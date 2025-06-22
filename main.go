@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json" // JSON 数据处理
+	"flag"          // 命令行参数解析
+	"fmt"           // 格式化输出
 	"io/ioutil"     // 文件读取
 	"log"           // 日志输出
 	"net/http"      // HTTP 服务器
@@ -17,6 +19,9 @@ import (
 
 	"github.com/gorilla/websocket" // WebSocket 库
 )
+
+// 版本信息
+var Version = "dev"
 
 // Site 站点数据结构
 type Site struct {
@@ -72,6 +77,36 @@ var upgrader = websocket.Upgrader{
 
 // 全局 Hub 实例
 var hub *Hub
+
+// 命令行参数
+var (
+	addr    = flag.String("addr", "0.0.0.0:10086", "监听地址 (格式: host:port)")
+	version = flag.Bool("version", false, "显示版本信息")
+	help    = flag.Bool("help", false, "显示帮助信息")
+)
+
+// 显示帮助信息
+func showHelp() {
+	fmt.Printf("LiveUser v%s - 实时在线用户统计服务\n\n", Version)
+	fmt.Println("用法:")
+	fmt.Printf("  %s [选项]\n\n", os.Args[0])
+	fmt.Println("选项:")
+	fmt.Println("  -addr string")
+	fmt.Println("        监听地址 (默认: 0.0.0.0:10086)")
+	fmt.Println("  -version")
+	fmt.Println("        显示版本信息")
+	fmt.Println("  -help")
+	fmt.Println("        显示此帮助信息")
+	fmt.Println()
+	fmt.Println("示例:")
+	fmt.Printf("  %s                          # 默认监听 0.0.0.0:10086\n", os.Args[0])
+	fmt.Printf("  %s -addr :8080              # 监听 8080 端口\n", os.Args[0])
+	fmt.Printf("  %s -addr 127.0.0.1:3000     # 仅监听本地 3000 端口\n", os.Args[0])
+	fmt.Println()
+	fmt.Println("环境变量:")
+	fmt.Println("  PORT        端口号 (会被 -addr 参数覆盖)")
+	fmt.Println()
+}
 
 // NewHub 创建新的 Hub
 func NewHub() *Hub {
@@ -478,6 +513,31 @@ func (c *Client) writePump() {
 
 // 主函数
 func main() {
+	// 解析命令行参数
+	flag.Parse()
+
+	// 显示版本信息
+	if *version {
+		fmt.Printf("LiveUser v%s\n", Version)
+		return
+	}
+
+	// 显示帮助信息
+	if *help {
+		showHelp()
+		return
+	}
+
+	// 获取监听地址
+	listenAddr := *addr
+	
+	// 如果使用默认地址但设置了 PORT 环境变量，则优先使用环境变量
+	if *addr == "0.0.0.0:10086" {
+		if port := os.Getenv("PORT"); port != "" {
+			listenAddr = "0.0.0.0:" + port
+		}
+	}
+
 	// 初始化 Hub
 	hub = NewHub()
 	go hub.Run()
@@ -485,22 +545,16 @@ func main() {
 	// 设置路由处理器
 	http.HandleFunc("/", handleRequest)
 
-	// 获取端口，默认 10086
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "10086"
-	}
-
 	// 创建 HTTP 服务器
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    listenAddr,
 		Handler: nil, // 使用默认的 ServeMux
 	}
 
 	// 启动服务器
 	go func() {
-		log.Printf("🚀 LiveUser 服务器启动成功！")
-		log.Printf("📡 服务端口: %s", port)
+		log.Printf("🚀 LiveUser v%s 服务器启动成功！", Version)
+		log.Printf("📡 监听地址: %s", listenAddr)
 		log.Printf("🔗 WebSocket: 任意路径支持 WebSocket 连接")
 		log.Printf("📄 演示页面: 任意路径的 HTTP 请求都返回演示页面")
 		log.Printf("📜 动态脚本: 任意 .js 文件请求返回配置化的 LiveUser 脚本")
