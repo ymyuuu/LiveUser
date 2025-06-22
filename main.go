@@ -23,11 +23,11 @@ import (
 var Version = "dev"
 
 // 内置静态文件
-//go:embed main.js
-var mainJS string
-
 //go:embed demo.html
 var demoHTML string
+
+//go:embed main.js
+var mainJS string
 
 // 站点数据结构
 type Site struct {
