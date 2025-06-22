@@ -1,8 +1,11 @@
 /**
  * LiveUser 实时在线人数统计
+ * 支持多种显示模式：span元素、悬浮显示器、或两者同时
+ * 
  * 使用方法：
- * <span id="liveuser">加载中...</span>
  * <script src="https://your-domain.com/liveuser.js"></script>
+ * <script src="https://your-domain.com/liveuser.js?type=float"></script>
+ * <script src="https://your-domain.com/liveuser.js?type=span&displayElementId=custom-id"></script>
  */
 (function() {
     'use strict';
@@ -14,11 +17,11 @@
     
     // 配置项（由服务器动态生成）
     const CONFIG = {
-        serverUrl: '{{.ServerURL}}',
         siteId: '{{.SiteID}}',
         displayElementId: '{{.DisplayElementID}}',
         reconnectDelay: {{.ReconnectDelay}},
-        debug: {{.Debug}}
+        debug: {{.Debug}},
+        type: '{{.Type}}'  // all, span, float
     };
     
     // LiveUser 核心类
@@ -28,22 +31,137 @@
             this.isActive = true;
             this.reconnectTimer = null;
             this.currentCount = 0;
-            this.displayElement = document.getElementById(CONFIG.displayElementId);
+            this.displayElement = null;
+            this.floatElement = null;
             
             this.init();
         }
         
         init() {
-            this.log('LiveUser 初始化，站点: ' + CONFIG.siteId);
-            this.checkDisplayElement();
+            this.log('LiveUser 初始化，站点: ' + CONFIG.siteId + ', 显示模式: ' + CONFIG.type);
+            this.setupDisplayElements();
             this.setupEventListeners();
             this.connect();
         }
         
-        checkDisplayElement() {
-            if (!this.displayElement) {
-                this.log('警告: 找不到元素 #' + CONFIG.displayElementId);
+        setupDisplayElements() {
+            // 根据type参数设置显示元素
+            if (CONFIG.type === 'all' || CONFIG.type === 'span') {
+                this.displayElement = document.getElementById(CONFIG.displayElementId);
+                if (!this.displayElement && CONFIG.debug) {
+                    this.log('未找到 span 元素 #' + CONFIG.displayElementId + '，将跳过 span 显示');
+                }
             }
+            
+            if (CONFIG.type === 'all' || CONFIG.type === 'float') {
+                this.createFloatDisplay();
+            }
+        }
+        
+        createFloatDisplay() {
+            // 检查是否已存在悬浮显示器
+            if (document.getElementById('liveuser-float-counter')) {
+                this.floatElement = document.getElementById('liveuser-float-counter');
+                return;
+            }
+            
+            // 创建悬浮显示器
+            const floatCounter = document.createElement('div');
+            floatCounter.id = 'liveuser-float-counter';
+            floatCounter.innerHTML = `
+                <div class="liveuser-indicator"></div>
+                <span class="liveuser-count">0</span>
+            `;
+            
+            // 添加样式
+            const style = document.createElement('style');
+            style.textContent = `
+                #liveuser-float-counter {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    background: rgba(0, 0, 0, 0.8);
+                    backdrop-filter: blur(8px);
+                    border-radius: 20px;
+                    padding: 8px 12px;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #fff;
+                    z-index: 9999;
+                    transition: all 0.3s ease;
+                    cursor: default;
+                    user-select: none;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+                }
+                #liveuser-float-counter:hover {
+                    transform: scale(1.05);
+                    background: rgba(0, 0, 0, 0.9);
+                }
+                #liveuser-float-counter.updating {
+                    transform: scale(1.1);
+                    background: rgba(0, 212, 170, 0.2);
+                }
+                .liveuser-indicator {
+                    width: 8px;
+                    height: 8px;
+                    background: #00d4aa;
+                    border-radius: 50%;
+                    position: relative;
+                    animation: liveuser-breathe 3s ease-in-out infinite;
+                }
+                .liveuser-indicator::before {
+                    content: '';
+                    position: absolute;
+                    top: -2px;
+                    left: -2px;
+                    right: -2px;
+                    bottom: -2px;
+                    background: #00d4aa;
+                    border-radius: 50%;
+                    opacity: 0.3;
+                    animation: liveuser-ripple 3s ease-in-out infinite;
+                }
+                .liveuser-count {
+                    transition: all 0.3s ease;
+                }
+                @keyframes liveuser-breathe {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.6; }
+                }
+                @keyframes liveuser-ripple {
+                    0% {
+                        transform: scale(0.8);
+                        opacity: 0.3;
+                    }
+                    50% {
+                        transform: scale(1.2);
+                        opacity: 0.1;
+                    }
+                    100% {
+                        transform: scale(0.8);
+                        opacity: 0.3;
+                    }
+                }
+                @media (max-width: 768px) {
+                    #liveuser-float-counter {
+                        bottom: 15px;
+                        right: 15px;
+                        padding: 6px 10px;
+                        font-size: 12px;
+                    }
+                }
+            `;
+            
+            // 添加到页面
+            document.head.appendChild(style);
+            document.body.appendChild(floatCounter);
+            this.floatElement = floatCounter;
+            
+            this.log('已创建悬浮显示器');
         }
         
         setupEventListeners() {
@@ -86,10 +204,14 @@
                 return;
             }
             
-            this.log('连接 WebSocket: ' + CONFIG.serverUrl);
+            // 自动识别协议和服务器地址
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const serverUrl = protocol + '//' + window.location.host + '/';
+            
+            this.log('连接 WebSocket: ' + serverUrl);
             
             try {
-                this.ws = new WebSocket(CONFIG.serverUrl);
+                this.ws = new WebSocket(serverUrl);
                 
                 this.ws.onopen = () => {
                     this.log('连接成功');
@@ -142,7 +264,8 @@
             const oldCount = this.currentCount;
             this.currentCount = count;
             
-            if (this.displayElement) {
+            // 更新 span 元素（如果存在且启用）
+            if (this.displayElement && (CONFIG.type === 'all' || CONFIG.type === 'span')) {
                 this.displayElement.classList.add('updating');
                 this.displayElement.textContent = count;
                 
@@ -151,11 +274,24 @@
                         this.displayElement.classList.remove('updating');
                     }
                 }, 300);
-                
-                this.log('更新人数: ' + oldCount + ' -> ' + count);
-            } else {
-                this.displayElement = document.getElementById(CONFIG.displayElementId);
             }
+            
+            // 更新悬浮显示器（如果存在且启用）
+            if (this.floatElement && (CONFIG.type === 'all' || CONFIG.type === 'float')) {
+                const countElement = this.floatElement.querySelector('.liveuser-count');
+                if (countElement) {
+                    this.floatElement.classList.add('updating');
+                    countElement.textContent = count;
+                    
+                    setTimeout(() => {
+                        if (this.floatElement) {
+                            this.floatElement.classList.remove('updating');
+                        }
+                    }, 300);
+                }
+            }
+            
+            this.log('更新人数: ' + oldCount + ' -> ' + count);
             
             // 触发自定义事件
             if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
