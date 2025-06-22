@@ -3,42 +3,49 @@
 
 <head>
   <meta charset="UTF-8">
+  <!-- 设置页面视口，确保移动端正常显示 -->
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
   <title>Live&#8204;User</title>
+  <!-- 设置页面图标 -->
   <link rel="icon" type="image/png" href="https://img.icons8.com/parakeet/1000/user.png">
 
+  <!-- 设置Open Graph元数据，用于社交分享 -->
   <meta property="og:description" content="Easily check LiveUser count on the website.">
   <meta property="og:image" content="https://img.icons8.com/parakeet/1000/user.png">
 
-  <!-- 引入 layui CSS -->
+  <!-- 引入 layui JavaScript 框架 -->
   <script src="https://cdn.jsdelivr.net/npm/layui/dist/layui.min.js"></script>
+  <!-- 引入 layui 深色主题 -->
   <script src="https://cdn.jsdelivr.net/gh/ymyuuu/config/JS/layui-dark.js"></script>
+  <!-- 引入 layui CSS 样式 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/layui/dist/css/layui.min.css">
 
-
   <style>
-    /* 设置响应式容器 */
+    /* 设置响应式容器的内边距 */
     .layui-container {
       padding: 0 20px;
     }
 
-    /* LiveUser 数字更新动画 */
+    /* LiveUser 数字更新动画效果 */
     #liveuser {
-      transition: all 0.3s ease;
-      display: inline-block;
+      transition: all 0.3s ease; /* 平滑过渡动画 */
+      display: inline-block; /* 行内块显示，支持transform变换 */
     }
 
+    /* 数字更新时的动画样式 */
     #liveuser.updating {
-      transform: scale(1.2);
-      color: #FFB800;
+      transform: scale(1.2); /* 放大1.2倍 */
+      color: #FFB800; /* 改变颜色为金黄色 */
     }
   </style>
 </head>
 
 <body>
+  <!-- 主容器，使用layui响应式布局 -->
   <div class="layui-container layui-text" style="margin-top: 20px;">
     <div class="layui-row">
+      <!-- 响应式列布局：手机12列，平板10列，桌面8列并居中 -->
       <div class="layui-col-xs12 layui-col-sm10 layui-col-md8 layui-col-md-offset2">
 
         <!-- LiveUser Status 模块 -->
@@ -47,6 +54,7 @@
           <div class="layui-field-box">
             <blockquote class="layui-elem-quote">
               <p>当前在线人数：
+                <!-- 显示在线人数的元素，初始显示加载动画 -->
                 <span id="liveuser">
                   <i class="layui-icon layui-icon-loading-1 layui-anim layui-anim-rotate layui-anim-loop"
                     style="font-size: 14px;"></i>
@@ -83,10 +91,13 @@
           <p>使用 LiveUser 极其简单，只需两步：</p>
 
           <p><strong>第一步：添加显示元素</strong></p>
-          <pre id="example1" class="layui-code code-demo"></pre>
+          <!-- 代码示例1：直接在HTML中编写，避免JavaScript动态生成时的编码问题 -->
+          <pre class="layui-code code-demo"><!-- 显示元素 -->
+<span id="liveuser">加载中...</span></pre>
 
           <p><strong>第二步：引入动态脚本</strong></p>
-          <pre id="example2" class="layui-code code-demo"></pre>
+          <!-- 代码示例2：使用span标签包裹动态内容，避免script标签解析问题 -->
+          <pre class="layui-code code-demo" id="example2"></pre>
 
           <p>就这两步！LiveUser 会自动连接并显示在线人数。<br>
             <strong>✨ 特色：</strong>服务器地址自动识别，站点 ID 自动获取，无需手动配置！
@@ -99,7 +110,8 @@
         </blockquote>
         <div class="layui-field-box">
           <p>您可以通过 URL 参数来自定义 LiveUser 的配置：</p>
-          <pre id="example3" class="layui-code code-demo"></pre>
+          <!-- 代码示例3：参数配置示例 -->
+          <pre class="layui-code code-demo" id="example3"></pre>
 
           <p><strong>可用参数：</strong></p>
           <ul class="layui-ul">
@@ -111,7 +123,8 @@
           </ul>
 
           <p><strong>多种使用方式：</strong></p>
-          <pre id="example4" class="layui-code code-demo"></pre>
+          <!-- 代码示例4：多种使用场景 -->
+          <pre class="layui-code code-demo" id="example4"></pre>
         </div>
 
         <!-- 特性说明模块 -->
@@ -170,71 +183,78 @@
     </div>
   </div>
 
-  <!-- 动态插入示例代码 -->
   <script>
-    // 获取当前协议和主机，用于生成示例代码
+    // 获取当前协议和主机信息，用于生成动态示例代码
     const currentHost = window.location.host;
     const protocol = window.location.protocol;
 
-    // 示例 1：显示元素的 HTML 代码（包含 CSS 样式）
-    const elementExample = `<!-- 显示元素 -->
-<span id="liveuser">加载中...</span>
-`;
+    // 创建HTML解码函数，用于将HTML实体转换为正常字符
+    function decodeHTML(html) {
+      const txt = document.createElement('textarea');
+      txt.innerHTML = html;
+      return txt.value;
+    }
 
-    document.getElementById('example1').textContent = elementExample;
+    // 安全地设置代码示例内容，避免HTML实体编码问题
+    function setCodeExample(elementId, content) {
+      const element = document.getElementById(elementId);
+      if (element) {
+        // 使用innerHTML而不是textContent，确保内容正确显示
+        element.innerHTML = content;
+      }
+    }
 
-    // 示例 2：基础引入方式
-    document.getElementById('example2').textContent = `<script src="${protocol}//${currentHost}/liveuser.js"><\/script>`;
+    // 示例 2：基础引入方式的脚本标签
+    const basicScript = `&lt;script src="${protocol}//${currentHost}/liveuser.js"&gt;&lt;/script&gt;`;
+    setCodeExample('example2', basicScript);
 
     // 示例 3：带参数的配置方式
-    const paramExample =
-      `<!-- 自定义配置示例 -->
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=my-site&debug=false"><\/script>
+    const paramExample = `&lt;!-- 自定义配置示例 --&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?siteId=my-site&amp;debug=false"&gt;&lt;/script&gt;
 
-<!-- 指定服务器地址 -->
-<script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://my-server.com&siteId=blog"><\/script>
+&lt;!-- 指定服务器地址 --&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://my-server.com&amp;siteId=blog"&gt;&lt;/script&gt;
 
-<!-- 完整配置 -->
-<script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://live.example.com&siteId=homepage&displayElementId=counter&reconnectDelay=5000&debug=true"><\/script>`;
-
-    document.getElementById('example3').textContent = paramExample;
+&lt;!-- 完整配置 --&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://live.example.com&amp;siteId=homepage&amp;displayElementId=counter&amp;reconnectDelay=5000&amp;debug=true"&gt;&lt;/script&gt;`;
+    setCodeExample('example3', paramExample);
 
     // 示例 4：多种使用场景
-    const usageExample = `<!-- 基础使用（推荐） -->
-<span id="liveuser">0</span>
-<style>
+    const usageExample = `&lt;!-- 基础使用（推荐） --&gt;
+&lt;span id="liveuser"&gt;0&lt;/span&gt;
+&lt;style&gt;
 #liveuser { transition: all 0.3s ease; display: inline-block; }
 #liveuser.updating { transform: scale(1.2); color: #FFB800; }
-</style>
-<script src="${protocol}//${currentHost}/liveuser.js"><\/script>
+&lt;/style&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js"&gt;&lt;/script&gt;
 
-<!-- 博客页面 -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=blog"><\/script>
+&lt;!-- 博客页面 --&gt;
+&lt;span id="liveuser"&gt;0&lt;/span&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?siteId=blog"&gt;&lt;/script&gt;
 
-<!-- 产品页面 -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=product-page"><\/script>
+&lt;!-- 产品页面 --&gt;
+&lt;span id="liveuser"&gt;0&lt;/span&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?siteId=product-page"&gt;&lt;/script&gt;
 
-<!-- 自定义元素 ID -->
-<span id="online-count">0</span>
-<style>
+&lt;!-- 自定义元素 ID --&gt;
+&lt;span id="online-count"&gt;0&lt;/span&gt;
+&lt;style&gt;
 #online-count { transition: all 0.3s ease; display: inline-block; }
 #online-count.updating { transform: scale(1.2); color: #FFB800; }
-</style>
-<script src="${protocol}//${currentHost}/liveuser.js?displayElementId=online-count"><\/script>
+&lt;/style&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?displayElementId=online-count"&gt;&lt;/script&gt;
 
-<!-- 生产环境（关闭调试） -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?debug=false"><\/script>`;
-
-    document.getElementById('example4').textContent = usageExample;
+&lt;!-- 生产环境（关闭调试） --&gt;
+&lt;span id="liveuser"&gt;0&lt;/span&gt;
+&lt;script src="${protocol}//${currentHost}/liveuser.js?debug=false"&gt;&lt;/script&gt;`;
+    setCodeExample('example4', usageExample);
   </script>
 
   <script>
+    // 初始化layui代码高亮组件
     layui.use(function () {
       layui.code({
-        elem: '.code-demo'
+        elem: '.code-demo' // 为所有带有code-demo类的元素启用代码高亮
       });
     });
   </script>
@@ -243,8 +263,9 @@
   <script src="/liveuser.js?siteId=demo-site&debug=true"></script>
 
   <script>
+    // 初始化layui悬浮工具栏
     layui.use('util', function () {
-      layui.util.fixbar();
+      layui.util.fixbar(); // 显示返回顶部等悬浮按钮
     });
   </script>
 
