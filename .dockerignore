@@ -1,0 +1,38 @@
+# Git 相关
+.git
+.gitignore
+.github
+
+# 文档
+README.md
+*.md
+
+# 构建产物
+dist/
+release/
+artifacts/
+*.exe
+*.zip
+*.tar.gz
+
+# IDE 相关
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试相关
+*_test.go
+test/
+tests/
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
