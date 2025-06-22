@@ -45,7 +45,7 @@ jobs:
 
       - name: 验证必需文件
         run: |
-          required_files=("main.go" "main.js" "demo.html" "Dockerfile")
+          required_files=("main.go" "Dockerfile")
           missing_files=()
           
           for file in "${required_files[@]}"; do
@@ -57,6 +57,14 @@ jobs:
           if [ ${#missing_files[@]} -ne 0 ]; then
             echo "缺少必需文件:"
             printf '%s\n' "${missing_files[@]}"
+            exit 1
+          fi
+          
+          # 检查内置文件是否存在
+          if [ -f "main.js" ] && [ -f "demo.html" ]; then
+            echo "✅ 检测到静态文件，将内置到二进制中"
+          else
+            echo "❌ 错误: 静态文件不存在，无法内置到二进制中"
             exit 1
           fi
 
@@ -171,19 +179,34 @@ jobs:
             binary_name="${binary_name}.exe"
           fi
           
+          echo "🔨 构建 ${{ matrix.os }}/${{ matrix.arch }} 平台的二进制文件"
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${VERSION}" \
             -o "${binary_name}" \
             .
           
+          echo "📦 打包发布文件"
           mkdir -p dist
           package_name="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
           
+          # 只打包二进制文件，静态文件已内置
           if [ "${{ matrix.os }}" = "windows" ]; then
-            zip -9 "dist/${package_name}.zip" "${binary_name}" main.js demo.html
+            zip -9 "dist/${package_name}.zip" "${binary_name}"
+            echo "✅ 已创建: ${package_name}.zip"
           else
-            tar -czf "dist/${package_name}.tar.gz" "${binary_name}" main.js demo.html
+            tar -czf "dist/${package_name}.tar.gz" "${binary_name}"
+            echo "✅ 已创建: ${package_name}.tar.gz"
+          fi
+          
+          # 显示文件信息
+          echo "📊 文件信息:"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            ls -lh "dist/${package_name}.zip"
+            unzip -l "dist/${package_name}.zip"
+          else
+            ls -lh "dist/${package_name}.tar.gz"
+            tar -tzf "dist/${package_name}.tar.gz"
           fi
 
       - name: 上传构建产物
@@ -211,12 +234,22 @@ jobs:
         run: |
           mkdir -p release
           
+          echo "📥 收集构建产物"
           find artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
-            cp "$file" release/
+            filename=$(basename "$file")
+            cp "$file" "release/$filename"
+            echo "✅ 已添加: $filename"
           done
           
+          echo "🔒 生成 SHA256 校验和"
           cd release
           sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || sha256sum * > checksums.txt
+          
+          echo "📋 发布清单:"
+          ls -lh
+          echo ""
+          echo "🔑 SHA256 校验和:"
+          cat checksums.txt
 
       - name: 生成发布说明
         run: |
@@ -271,6 +304,11 @@ jobs:
           VERSION="${{ needs.version.outputs.version }}"
           IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
           
+          echo "🐳 构建 Docker 镜像 (预发布版)"
+          echo "📦 镜像标签:"
+          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:$VERSION"
+          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:beta"
+          
           docker buildx build \
             --build-arg VERSION="$VERSION" \
             --build-arg GO_VERSION="${{ env.GO_VERSION }}" \
@@ -279,6 +317,8 @@ jobs:
             --tag "$DOCKER_USERNAME/$IMAGE_NAME:beta" \
             --push \
             .
+          
+          echo "✅ Docker 镜像推送完成"
 
       - name: 构建并推送镜像 (Release)
         if: ${{ needs.version.outputs.is_release == 'true' }}
@@ -286,6 +326,11 @@ jobs:
           DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
           VERSION="${{ needs.version.outputs.version }}"
           IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
+          
+          echo "🐳 构建 Docker 镜像 (正式版)"
+          echo "📦 镜像标签:"
+          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:$VERSION"
+          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:latest"
           
           docker buildx build \
             --build-arg VERSION="$VERSION" \
@@ -295,3 +340,5 @@ jobs:
             --tag "$DOCKER_USERNAME/$IMAGE_NAME:latest" \
             --push \
             .
+          
+          echo "✅ Docker 镜像推送完成"
