@@ -1,0 +1,307 @@
+name: LiveUser
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: '发布类型'
+        required: true
+        default: 'Beta'
+        type: choice
+        options:
+          - Beta
+          - Release
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: "1.23"
+  BINARY_NAME: "LiveUser"
+  MODULE_NAME: "github.com/${{ github.repository }}"
+  DOCKER_IMAGE: "liveuser"
+  PLATFORMS: "linux/amd64,linux/arm64"
+
+################################################################################
+# 代码检查 (所有情况都执行)
+################################################################################
+jobs:
+  lint:
+    name: 代码检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Go 环境
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: 验证必需文件
+        run: |
+          required_files=("main.go" "main.js" "demo.html")
+          missing_files=()
+          
+          for file in "${required_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing_files+=("$file")
+            fi
+          done
+          
+          if [ ${#missing_files[@]} -ne 0 ]; then
+            echo "缺少必需文件:"
+            printf '%s\n' "${missing_files[@]}"
+            exit 1
+          fi
+
+      - name: 初始化模块
+        run: |
+          if [ ! -f go.mod ]; then
+            go mod init ${{ env.MODULE_NAME }}
+          fi
+          
+          go get github.com/gorilla/websocket@latest
+          go mod tidy
+
+      - name: 代码检查
+        run: |
+          go fmt ./...
+          go vet ./...
+          go build -o /tmp/test-build .
+          rm -f /tmp/test-build
+
+################################################################################
+# 版本处理 (仅手动触发时执行)
+################################################################################
+  version:
+    name: 版本处理
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: lint
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 计算版本号
+        id: version
+        run: |
+          echo "is_release=${{ github.event.inputs.release_type == 'Release' }}" >> $GITHUB_OUTPUT
+          
+          latest_tag=$(git tag -l "v*" --sort=-version:refname | head -n1 || echo "v0.0.0")
+          
+          if [[ $latest_tag =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            patch=${BASH_REMATCH[3]}
+          else
+            major=0
+            minor=0
+            patch=0
+          fi
+          
+          patch=$((patch + 1))
+          new_version="v${major}.${minor}.${patch}"
+          
+          echo "version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: 创建标签
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.version }}" -m "Release ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+################################################################################
+# 多平台构建 (仅手动触发时执行)
+################################################################################
+  build:
+    name: 构建
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: darwin, arch: amd64 }
+          - { os: darwin, arch: arm64 }
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: arm64 }
+          - { os: freebsd, arch: amd64 }
+          - { os: freebsd, arch: arm64 }
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Go 环境
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: 准备依赖
+        run: |
+          if [ ! -f go.mod ]; then
+            go mod init ${{ env.MODULE_NAME }}
+          fi
+          
+          go get github.com/gorilla/websocket@latest
+          go mod tidy
+
+      - name: 构建二进制
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          binary_name="${{ env.BINARY_NAME }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            binary_name="${binary_name}.exe"
+          fi
+          
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "${binary_name}" \
+            .
+          
+          mkdir -p dist
+          package_name="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
+          
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip -9 "dist/${package_name}.zip" "${binary_name}" main.js demo.html
+          else
+            tar -czf "dist/${package_name}.tar.gz" "${binary_name}" main.js demo.html
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/
+          retention-days: 1
+
+################################################################################
+# Docker 构建 (仅手动触发时执行)
+################################################################################
+  docker:
+    name: Docker 构建
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: version
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 构建并推送镜像 (Beta)
+        if: ${{ needs.version.outputs.is_release != 'true' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ needs.version.outputs.version }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:beta
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            GO_VERSION=${{ env.GO_VERSION }}
+
+      - name: 构建并推送镜像 (Release)
+        if: ${{ needs.version.outputs.is_release == 'true' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ needs.version.outputs.version }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            GO_VERSION=${{ env.GO_VERSION }}
+
+################################################################################
+# 发布 (仅手动触发时执行)
+################################################################################
+  release:
+    name: 发布
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    needs: [version, build, docker]
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: 整理发布文件并生成校验和
+        run: |
+          mkdir -p release
+          
+          # 移动所有包文件到release目录
+          find artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
+            cp "$file" release/
+          done
+          
+          # 在release目录中生成所有文件的校验和
+          cd release
+          sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || sha256sum * > checksums.txt
+          
+          echo "发布文件列表:"
+          ls -la
+          echo
+          echo "SHA256校验和:"
+          cat checksums.txt
+
+      - name: 生成发布说明
+        run: |
+          echo "**SHA256:**" > release_notes.md
+          echo '```' >> release_notes.md
+          cat release/checksums.txt >> release_notes.md
+          echo '```' >> release_notes.md
+
+      - name: 创建 Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.version.outputs.version }}
+          name: "${{ needs.version.outputs.version }}"
+          bodyFile: release_notes.md
+          artifacts: "release/*"
+          draft: false
+          prerelease: ${{ needs.version.outputs.is_release != 'true' }}
+          generateReleaseNotes: false
+          allowUpdates: true
+          removeArtifacts: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
