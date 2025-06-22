@@ -243,13 +243,13 @@ jobs:
 
       - name: 构建并推送镜像 (Beta)
         if: ${{ needs.version.outputs.is_release != 'true' }}
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          VERSION: ${{ needs.version.outputs.version }}
-          IMAGE_NAME: ${{ env.DOCKER_IMAGE }}
         run: |
+          # 设置变量
+          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          VERSION="${{ needs.version.outputs.version }}"
+          IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
+          
           echo "构建信息:"
-          echo "  Docker 用户名: $DOCKER_USERNAME"
           echo "  镜像名称: $IMAGE_NAME"
           echo "  版本: $VERSION"
           echo "  目标标签:"
@@ -257,24 +257,36 @@ jobs:
           echo "    - $DOCKER_USERNAME/$IMAGE_NAME:beta"
           echo ""
           
+          # 验证变量不为空
+          if [ -z "$DOCKER_USERNAME" ]; then
+            echo "错误: DOCKER_USERNAME 为空"
+            exit 1
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            echo "错误: VERSION 为空"
+            exit 1
+          fi
+          
+          # 构建并推送
           docker buildx build \
-            --build-arg VERSION=$VERSION \
-            --build-arg GO_VERSION=${{ env.GO_VERSION }} \
+            --build-arg VERSION="$VERSION" \
+            --build-arg GO_VERSION="${{ env.GO_VERSION }}" \
             --platform linux/amd64,linux/arm64 \
-            --tag $DOCKER_USERNAME/$IMAGE_NAME:$VERSION \
-            --tag $DOCKER_USERNAME/$IMAGE_NAME:beta \
+            --tag "$DOCKER_USERNAME/$IMAGE_NAME:$VERSION" \
+            --tag "$DOCKER_USERNAME/$IMAGE_NAME:beta" \
             --push \
             .
 
       - name: 构建并推送镜像 (Release)
         if: ${{ needs.version.outputs.is_release == 'true' }}
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          VERSION: ${{ needs.version.outputs.version }}
-          IMAGE_NAME: ${{ env.DOCKER_IMAGE }}
         run: |
+          # 设置变量
+          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          VERSION="${{ needs.version.outputs.version }}"
+          IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
+          
           echo "构建信息:"
-          echo "  Docker 用户名: $DOCKER_USERNAME"
           echo "  镜像名称: $IMAGE_NAME"
           echo "  版本: $VERSION"
           echo "  目标标签:"
@@ -282,12 +294,24 @@ jobs:
           echo "    - $DOCKER_USERNAME/$IMAGE_NAME:latest"
           echo ""
           
+          # 验证变量不为空
+          if [ -z "$DOCKER_USERNAME" ]; then
+            echo "错误: DOCKER_USERNAME 为空"
+            exit 1
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            echo "错误: VERSION 为空"
+            exit 1
+          fi
+          
+          # 构建并推送
           docker buildx build \
-            --build-arg VERSION=$VERSION \
-            --build-arg GO_VERSION=${{ env.GO_VERSION }} \
+            --build-arg VERSION="$VERSION" \
+            --build-arg GO_VERSION="${{ env.GO_VERSION }}" \
             --platform linux/amd64,linux/arm64 \
-            --tag $DOCKER_USERNAME/$IMAGE_NAME:$VERSION \
-            --tag $DOCKER_USERNAME/$IMAGE_NAME:latest \
+            --tag "$DOCKER_USERNAME/$IMAGE_NAME:$VERSION" \
+            --tag "$DOCKER_USERNAME/$IMAGE_NAME:latest" \
             --push \
             .
 
