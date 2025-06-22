@@ -226,6 +226,24 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: 调试 Secrets
+        run: |
+          echo "检查 DOCKER_USERNAME secret..."
+          if [ -z "${{ secrets.DOCKER_USERNAME }}" ]; then
+            echo "❌ DOCKER_USERNAME 为空！"
+            exit 1
+          fi
+          
+          echo "✅ DOCKER_USERNAME 已设置"
+          echo "用户名长度: ${#DOCKER_USERNAME}"
+          echo "用户名: ${DOCKER_USERNAME}"
+          
+          # 测试镜像标签格式
+          TAG="${DOCKER_USERNAME}/${{ env.DOCKER_IMAGE }}:test"
+          echo "测试标签: $TAG"
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+
       - name: 构建并推送镜像 (Beta)
         if: ${{ needs.version.outputs.is_release != 'true' }}
         uses: docker/build-push-action@v5
