@@ -26,9 +26,6 @@ env:
   DOCKER_IMAGE: "liveuser"
   MODULE_NAME: "github.com/${{ github.repository }}"
 
-################################################################################
-# 代码检查 (所有情况都执行)
-################################################################################
 jobs:
   lint:
     name: 代码检查
@@ -43,47 +40,28 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
 
-      - name: 验证必需文件
+      - name: 验证文件
         run: |
-          required_files=("main.go" "Dockerfile")
-          missing_files=()
-          
+          required_files=("main.go" "main.js" "demo.html" "Dockerfile")
           for file in "${required_files[@]}"; do
             if [ ! -f "$file" ]; then
-              missing_files+=("$file")
+              echo "缺少文件: $file"
+              exit 1
             fi
           done
-          
-          if [ ${#missing_files[@]} -ne 0 ]; then
-            echo "缺少必需文件:"
-            printf '%s\n' "${missing_files[@]}"
-            exit 1
-          fi
-          
-          # 检查内置文件是否存在
-          if [ -f "main.js" ] && [ -f "demo.html" ]; then
-            echo "✅ 检测到静态文件，将内置到二进制中"
-          else
-            echo "❌ 错误: 静态文件不存在，无法内置到二进制中"
-            exit 1
-          fi
 
-      - name: 初始化模块并检查代码
+      - name: 代码检查
         run: |
           if [ ! -f go.mod ]; then
             go mod init ${{ env.MODULE_NAME }}
           fi
-          
           go get github.com/gorilla/websocket@latest
           go mod tidy
           go fmt ./...
           go vet ./...
-          go build -o /tmp/test-build .
-          rm -f /tmp/test-build
+          go build -o /tmp/test .
+          rm -f /tmp/test
 
-################################################################################
-# 版本处理 (仅手动触发时执行)
-################################################################################
   version:
     name: 版本处理
     runs-on: ubuntu-latest
@@ -117,7 +95,6 @@ jobs:
           
           patch=$((patch + 1))
           new_version="v${major}.${minor}.${patch}"
-          
           echo "version=$new_version" >> $GITHUB_OUTPUT
 
       - name: 创建标签
@@ -129,11 +106,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-################################################################################
-# 二进制构建和 GitHub Release (并行执行)
-################################################################################
   build-and-release:
-    name: 构建和发布
+    name: 构建
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     needs: version
@@ -163,7 +137,6 @@ jobs:
           if [ ! -f go.mod ]; then
             go mod init ${{ env.MODULE_NAME }}
           fi
-          
           go get github.com/gorilla/websocket@latest
           go mod tidy
 
@@ -179,34 +152,19 @@ jobs:
             binary_name="${binary_name}.exe"
           fi
           
-          echo "🔨 构建 ${{ matrix.os }}/${{ matrix.arch }} 平台的二进制文件"
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${VERSION}" \
             -o "${binary_name}" \
             .
           
-          echo "📦 打包发布文件"
           mkdir -p dist
           package_name="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
           
-          # 只打包二进制文件，静态文件已内置
           if [ "${{ matrix.os }}" = "windows" ]; then
-            zip -9 "dist/${package_name}.zip" "${binary_name}"
-            echo "✅ 已创建: ${package_name}.zip"
+            zip -9 "dist/${package_name}.zip" "${binary_name}" main.js demo.html
           else
-            tar -czf "dist/${package_name}.tar.gz" "${binary_name}"
-            echo "✅ 已创建: ${package_name}.tar.gz"
-          fi
-          
-          # 显示文件信息
-          echo "📊 文件信息:"
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            ls -lh "dist/${package_name}.zip"
-            unzip -l "dist/${package_name}.zip"
-          else
-            ls -lh "dist/${package_name}.tar.gz"
-            tar -tzf "dist/${package_name}.tar.gz"
+            tar -czf "dist/${package_name}.tar.gz" "${binary_name}" main.js demo.html
           fi
 
       - name: 上传构建产物
@@ -216,9 +174,8 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # GitHub Release 发布任务
   github-release:
-    name: GitHub 发布
+    name: 发布
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     needs: [version, build-and-release]
@@ -230,26 +187,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: 整理发布文件并生成校验和
+      - name: 整理发布文件
         run: |
           mkdir -p release
-          
-          echo "📥 收集构建产物"
           find artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
-            filename=$(basename "$file")
-            cp "$file" "release/$filename"
-            echo "✅ 已添加: $filename"
+            cp "$file" release/
           done
-          
-          echo "🔒 生成 SHA256 校验和"
           cd release
           sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || sha256sum * > checksums.txt
-          
-          echo "📋 发布清单:"
-          ls -lh
-          echo ""
-          echo "🔑 SHA256 校验和:"
-          cat checksums.txt
 
       - name: 生成发布说明
         run: |
@@ -273,9 +218,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-################################################################################
-# Docker 构建与推送 (并行执行)
-################################################################################
   docker:
     name: Docker 构建
     runs-on: ubuntu-latest
@@ -300,45 +242,21 @@ jobs:
       - name: 构建并推送镜像 (Beta)
         if: ${{ needs.version.outputs.is_release != 'true' }}
         run: |
-          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
-          VERSION="${{ needs.version.outputs.version }}"
-          IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
-          
-          echo "🐳 构建 Docker 镜像 (预发布版)"
-          echo "📦 镜像标签:"
-          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:$VERSION"
-          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:beta"
-          
           docker buildx build \
-            --build-arg VERSION="$VERSION" \
-            --build-arg GO_VERSION="${{ env.GO_VERSION }}" \
+            --build-arg VERSION="${{ needs.version.outputs.version }}" \
             --platform linux/amd64,linux/arm64 \
-            --tag "$DOCKER_USERNAME/$IMAGE_NAME:$VERSION" \
-            --tag "$DOCKER_USERNAME/$IMAGE_NAME:beta" \
+            --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ needs.version.outputs.version }}" \
+            --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:beta" \
             --push \
             .
-          
-          echo "✅ Docker 镜像推送完成"
 
       - name: 构建并推送镜像 (Release)
         if: ${{ needs.version.outputs.is_release == 'true' }}
         run: |
-          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
-          VERSION="${{ needs.version.outputs.version }}"
-          IMAGE_NAME="${{ env.DOCKER_IMAGE }}"
-          
-          echo "🐳 构建 Docker 镜像 (正式版)"
-          echo "📦 镜像标签:"
-          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:$VERSION"
-          echo "  - $DOCKER_USERNAME/$IMAGE_NAME:latest"
-          
           docker buildx build \
-            --build-arg VERSION="$VERSION" \
-            --build-arg GO_VERSION="${{ env.GO_VERSION }}" \
+            --build-arg VERSION="${{ needs.version.outputs.version }}" \
             --platform linux/amd64,linux/arm64 \
-            --tag "$DOCKER_USERNAME/$IMAGE_NAME:$VERSION" \
-            --tag "$DOCKER_USERNAME/$IMAGE_NAME:latest" \
+            --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ needs.version.outputs.version }}" \
+            --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest" \
             --push \
             .
-          
-          echo "✅ Docker 镜像推送完成"
