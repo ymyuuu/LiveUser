@@ -121,7 +121,7 @@ func (h *Hub) handleRegister(client *Client) {
 	count := site.Count
 	site.mutex.Unlock()
 
-	log.Printf("客户端加入站点 %s，在线: %d", site.ID, count)
+	log.Printf("客户端 %s 加入站点 %s，在线: %d", client.ip, site.ID, count)
 	h.broadcastToSite(site.ID, count)
 }
 
@@ -145,7 +145,7 @@ func (h *Hub) handleUnregister(client *Client) {
 		connectionsLeft := len(site.Connections)
 		site.mutex.Unlock()
 
-		log.Printf("客户端离开站点 %s，在线: %d", site.ID, count)
+		log.Printf("客户端 %s 离开站点 %s，在线: %d", client.ip, site.ID, count)
 
 		if connectionsLeft == 0 {
 			h.mutex.Lock()
