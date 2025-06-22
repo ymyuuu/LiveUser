@@ -1,252 +1,115 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
-    <title>Live&#8204;User</title>
-    <link rel="icon" type="image/png" href="https://img.icons8.com/parakeet/1000/user.png">
-
-    <meta property="og:description" content="Easily check LiveUser count on the website.">
-    <meta property="og:image" content="https://img.icons8.com/parakeet/1000/user.png">
-
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveUser - 实时在线用户统计</title>
+  <link rel="icon" type="image/png" href="https://img.icons8.com/parakeet/1000/user.png">
+  
   <!-- 引入layui框架的JavaScript和CSS文件 -->
   <script src="https://cdn.jsdelivr.net/npm/layui/dist/layui.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/ymyuuu/config/JS/layui-dark.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/layui/dist/css/layui.min.css">
 
+  <style>
+    #liveuser {
+      transition: all 0.3s ease;
+      display: inline-block;
+      font-weight: bold;
+    }
+    #liveuser.updating {
+      transform: scale(1.2);
+      color: #FFB800;
+    }
+  </style>
+</head>
 
-    <style>
-      /* 设置响应式容器 */
-      .layui-container {
-        padding: 0 20px;
-      }
+<body>
+  <div class="layui-container" style="margin-top: 20px;">
+    <div class="layui-row">
+      <div class="layui-col-md8 layui-col-md-offset2">
 
-      /* LiveUser 数字更新动画 */
-      #liveuser {
-        transition: all 0.3s ease;
-        display: inline-block;
-      }
-
-      #liveuser.updating {
-        transform: scale(1.2);
-        color: #FFB800;
-      }
-    </style>
-  </head>
-
-  <body>
-    <div class="layui-container layui-text" style="margin-top: 20px;">
-      <div class="layui-row">
-        <div class="layui-col-xs12 layui-col-sm10 layui-col-md8 layui-col-md-offset2">
-
-          <!-- LiveUser Status 模块 -->
-          <fieldset class="layui-elem-field layui-field-title">
-            <legend><i class="layui-icon layui-icon-radio"></i> LiveUser Status</legend>
-            <div class="layui-field-box">
-              <blockquote class="layui-elem-quote">
-                <p>当前在线人数：
-                  <span id="liveuser">
-                    <i class="layui-icon layui-icon-loading-1 layui-anim layui-anim-rotate layui-anim-loop"
-                      style="font-size: 14px;"></i>
-                  </span>
-                </p>
-              </blockquote>
-            </div>
-          </fieldset>
-
-          <!-- 服务介绍模块 -->
-          <fieldset class="layui-elem-field layui-field-title">
-            <legend><i class="layui-icon layui-icon-user"></i> LiveUser 服务介绍</legend>
-            <div class="layui-field-box">
-              <blockquote class="layui-elem-quote">
-                LiveUser 是一款基于 Go + WebSocket 技术的高性能实时在线用户统计服务，旨在为网站提供精准的实时在线人数统计与监控。
-              </blockquote>
-              <ul class="layui-ul">
-                <li><strong>⚡ 超低延迟：</strong> 通过 WebSocket 长连接实现毫秒级数据传输，确保在线人数统计实时更新。</li>
-                <li><strong>🔒 高稳定性：</strong> Go 语言原生并发，支持万级并发连接，保证高流量情况下稳定运行。</li>
-                <li><strong>🔗 无缝集成：</strong> 只需引入一行 script 标签即可轻松集成到任何网站，兼容各种主流浏览器。</li>
-                <li><strong>📈 实时分析：</strong> 实时显示当前站点在线人数，帮助您快速洞察用户行为。</li>
-                <li><strong>🌐 多站点支持：</strong> 支持自定义 <code>siteId</code>，可同时监控多个站点或子域名的在线人数。</li>
-                <li><strong>🚀 即插即用：</strong> 打开页面自动连接，无需手动配置，支持自动重连机制。</li>
-                <li><strong>⚙️ 动态配置：</strong> 通过 URL 参数灵活配置，无需修改代码。</li>
-              </ul>
-            </div>
-          </fieldset>
-
-          <!-- 如何开始使用模块 -->
-          <blockquote class="layui-elem-quote">
-            <i class="layui-icon layui-icon-form"></i> 如何快速开始使用 LiveUser
-          </blockquote>
+        <!-- 状态显示 -->
+        <fieldset class="layui-elem-field layui-field-title">
+          <legend><i class="layui-icon layui-icon-radio"></i> LiveUser 状态</legend>
           <div class="layui-field-box">
-            <p>使用 LiveUser 极其简单，只需两步：</p>
-
-            <p><strong>第一步：添加显示元素</strong></p>
-            <pre id="example1" class="layui-code code-demo"></pre>
-
-            <p><strong>第二步：引入动态脚本</strong></p>
-            <pre id="example2" class="layui-code code-demo"></pre>
-
-            <p>就这两步！LiveUser 会自动连接并显示在线人数。<br>
-              <strong>✨ 特色：</strong>服务器地址自动识别，站点 ID 自动获取，无需手动配置！
-            </p>
+            <blockquote class="layui-elem-quote">
+              当前在线人数：<span id="liveuser"><i class="layui-icon layui-icon-loading-1 layui-anim layui-anim-rotate layui-anim-loop"></i></span>
+            </blockquote>
           </div>
+        </fieldset>
 
-          <!-- 进阶用法模块 -->
-          <blockquote class="layui-elem-quote">
-            <i class="layui-icon layui-icon-set"></i> 进阶用法 - URL 参数配置
-          </blockquote>
+        <!-- 服务介绍 -->
+        <fieldset class="layui-elem-field layui-field-title">
+          <legend><i class="layui-icon layui-icon-user"></i> 关于 LiveUser</legend>
           <div class="layui-field-box">
-            <p>您可以通过 URL 参数来自定义 LiveUser 的配置：</p>
-            <pre id="example3" class="layui-code code-demo"></pre>
-
-            <p><strong>可用参数：</strong></p>
+            <p>LiveUser 是一款基于 Go + WebSocket 的高性能实时在线用户统计服务。</p>
             <ul class="layui-ul">
-              <li><code>serverUrl</code> - WebSocket 服务器地址（默认：自动识别）</li>
-              <li><code>siteId</code> - 站点标识符（默认：自动获取域名）</li>
-              <li><code>displayElementId</code> - 显示元素 ID（默认：liveuser）</li>
-              <li><code>reconnectDelay</code> - 重连延迟毫秒（默认：3000）</li>
-              <li><code>debug</code> - 调试模式（默认：true）</li>
-            </ul>
-
-            <p><strong>多种使用方式：</strong></p>
-            <pre id="example4" class="layui-code code-demo"></pre>
-          </div>
-
-          <!-- 特性说明模块 -->
-          <blockquote class="layui-elem-quote">
-            <i class="layui-icon layui-icon-star"></i> 技术特性
-          </blockquote>
-          <div class="layui-field-box">
-            <ul class="layui-ul">
-              <li><strong>🔄 智能重连：</strong> 网络断开后自动重连，连接稳定可靠。</li>
-              <li><strong>📱 响应式：</strong> 支持页面可见性检测，页面隐藏时保持连接。</li>
-              <li><strong>🛡️ 安全防护：</strong> 支持跨域连接，兼容各种部署环境。</li>
-              <li><strong>⚙️ 灵活路径：</strong> WebSocket 支持任意路径连接，部署更灵活。</li>
-              <li><strong>💾 轻量级：</strong> 无需数据库，纯内存统计，性能卓越。</li>
-              <li><strong>🎨 动画效果：</strong> 内置数字更新动画，视觉效果更佳。</li>
+              <li><strong>⚡ 实时统计</strong> - WebSocket 长连接，毫秒级更新</li>
+              <li><strong>🔗 简单集成</strong> - 一行代码即可集成</li>
+              <li><strong>🌐 多站点支持</strong> - 支持多个站点独立统计</li>
+              <li><strong>🚀 零配置</strong> - 自动识别服务器地址和站点</li>
             </ul>
           </div>
+        </fieldset>
 
-          <!-- 常见问题模块 -->
-          <fieldset class="layui-elem-field layui-field-title">
-            <legend><i class="layui-icon layui-icon-note"></i> 常见问题解答</legend>
-            <div class="layui-field-box">
-              <ul class="layui-ul">
-                <li><strong>Q1: LiveUser 能否显示多个站点的在线人数？</strong>
-                  <p>可以，您可以在不同的站点或页面中设置不同的 <code>siteId</code>，这样 LiveUser 服务会分别统计这些站点的在线人数。</p>
-                </li>
-                <li><strong>Q2: LiveUser 支持哪些浏览器？</strong>
-                  <p>LiveUser 支持所有现代浏览器，包括 Chrome、Firefox、Safari、Edge 等，以及移动端浏览器。</p>
-                </li>
-                <li><strong>Q3: 我的在线人数显示为连接中，怎么回事？</strong>
-                  <p>请检查服务器地址是否正确，网络连接是否正常，以及浏览器控制台是否有错误信息。</p>
-                </li>
-                <li><strong>Q4: 如何调试 WebSocket 连接问题？</strong>
-                  <p>打开浏览器的开发者工具，查看控制台日志输出和 Network 标签页的 WebSocket 连接状态。</p>
-                </li>
-                <li><strong>Q5: 服务器支持 HTTPS 吗？</strong>
-                  <p>支持，在 HTTPS 环境下请使用 <code>wss://</code> 协议连接 WebSocket 服务器。</p>
-                </li>
-                <li><strong>Q6: 如何自定义数字更新的动画效果？</strong>
-                  <p>可以通过 CSS 自定义 <code>.updating</code> 类的样式，LiveUser 会在数字更新时自动添加这个类。</p>
-                  <pre
-                    style="background: #f5f5f5; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 12px;">
-#liveuser {
-  transition: all 0.3s ease;
-  display: inline-block;
-}
-#liveuser.updating {
-  transform: scale(1.2);
-  color: #FFB800;
-  /* 你可以添加更多样式 */
-}</pre>
-                </li>
-              </ul>
-            </div>
-          </fieldset>
+        <!-- 使用方法 -->
+        <blockquote class="layui-elem-quote">
+          <i class="layui-icon layui-icon-form"></i> 快速开始
+        </blockquote>
+        
+        <p><strong>第一步：添加显示元素</strong></p>
+        <pre id="example1" class="layui-code"></pre>
 
-        </div>
+        <p><strong>第二步：引入脚本</strong></p>
+        <pre id="example2" class="layui-code"></pre>
+
+        <!-- 配置参数 -->
+        <blockquote class="layui-elem-quote">
+          <i class="layui-icon layui-icon-set"></i> 配置参数
+        </blockquote>
+        
+        <p>通过 URL 参数自定义配置：</p>
+        <pre id="example3" class="layui-code"></pre>
+
+        <p><strong>可用参数：</strong></p>
+        <ul class="layui-ul">
+          <li><code>siteId</code> - 站点标识符</li>
+          <li><code>displayElementId</code> - 显示元素 ID</li>
+          <li><code>debug</code> - 调试模式</li>
+          <li><code>reconnectDelay</code> - 重连延迟（毫秒）</li>
+        </ul>
+
       </div>
     </div>
+  </div>
 
-    <!-- 动态插入示例代码 -->
-    <script>
-      // 获取当前协议和主机，用于生成示例代码
-      const currentHost = window.location.host;
-      const protocol = window.location.protocol;
+  <script>
+    // 动态生成示例代码
+    const host = window.location.host;
+    const protocol = window.location.protocol;
 
-      // 示例 1：显示元素的 HTML 代码
-      const elementExample = `<!-- 显示元素 -->
-<span id="liveuser">加载中...</span>`;
+    document.getElementById('example1').textContent = `<span id="liveuser">加载中...</span>`;
+    
+    document.getElementById('example2').textContent = `<script src="${protocol}//${host}/liveuser.js"></script>`;
+    
+    document.getElementById('example3').textContent = `<!-- 自定义站点ID -->
+<script src="${protocol}//${host}/liveuser.js?siteId=blog"></script>
 
-      document.getElementById('example1').textContent = elementExample;
-
-      // 示例 2：基础引入方式
-      const basicExample = `<script src="${protocol}//${currentHost}/liveuser.js"></script>`;
-      document.getElementById('example2').textContent = basicExample;
-
-      // 示例 3：带参数的配置方式
-      const paramExample = `<!-- 自定义配置示例 -->
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=my-site&debug=false"></script>
-
-<!-- 指定服务器地址 -->
-<script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://my-server.com&siteId=blog"></script>
+<!-- 关闭调试模式 -->
+<script src="${protocol}//${host}/liveuser.js?debug=false"></script>
 
 <!-- 完整配置 -->
-<script src="${protocol}//${currentHost}/liveuser.js?serverUrl=wss://live.example.com&siteId=homepage&displayElementId=counter&reconnectDelay=5000&debug=true"></script>`;
+<script src="${protocol}//${host}/liveuser.js?siteId=my-site&displayElementId=counter&debug=false"></script>`;
 
-      document.getElementById('example3').textContent = paramExample;
+    // 初始化代码高亮
+    layui.use('code', function(){
+      layui.code();
+    });
+  </script>
 
-      // 示例 4：多种使用场景
-      const usageExample = `<!-- 基础使用（推荐） -->
-<span id="liveuser">0</span>
-<style>
-#liveuser { transition: all 0.3s ease; display: inline-block; }
-#liveuser.updating { transform: scale(1.2); color: #FFB800; }
-</style>
-<script src="${protocol}//${currentHost}/liveuser.js"></script>
+  <!-- LiveUser 统计脚本 -->
+  <script src="/liveuser.js?siteId=demo-site&debug=true"></script>
 
-<!-- 博客页面 -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=blog"></script>
-
-<!-- 产品页面 -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?siteId=product-page"></script>
-
-<!-- 自定义元素 ID -->
-<span id="online-count">0</span>
-<style>
-#online-count { transition: all 0.3s ease; display: inline-block; }
-#online-count.updating { transform: scale(1.2); color: #FFB800; }
-</style>
-<script src="${protocol}//${currentHost}/liveuser.js?displayElementId=online-count"></script>
-
-<!-- 生产环境（关闭调试） -->
-<span id="liveuser">0</span>
-<script src="${protocol}//${currentHost}/liveuser.js?debug=false"></script>`;
-
-      document.getElementById('example4').textContent = usageExample;
-    </script>
-
-    <script>
-      layui.use(function() {
-        layui.code({
-          elem: '.code-demo'
-        });
-      });
-    </script>
-
-    <!-- LiveUser 实时统计脚本 - 使用动态配置 -->
-    <script src="/liveuser.js?siteId=demo-site&debug=true"></script>
-
-    <script>
-      layui.use('util', function() {
-        layui.util.fixbar();
-      });
-    </script>
-
-  </body>
+</body>
 </html>
