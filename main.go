@@ -1,9 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,6 +21,13 @@ import (
 
 // 版本信息
 var Version = "dev"
+
+// 内置静态文件
+//go:embed main.js
+var mainJS string
+
+//go:embed demo.html
+var demoHTML string
 
 // 站点数据结构
 type Site struct {
@@ -240,15 +247,9 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 // 处理JavaScript文件请求
 func handleJavaScript(w http.ResponseWriter, r *http.Request) {
-	jsTemplate, err := ioutil.ReadFile("main.js")
-	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
 	config := parseJSConfig(r)
 
-	tmpl, err := template.New("liveuser").Parse(string(jsTemplate))
+	tmpl, err := template.New("liveuser").Parse(mainJS)
 	if err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
@@ -324,15 +325,9 @@ func getBoolParam(params url.Values, key string, defaultValue bool) bool {
 
 // 处理演示页面请求
 func handleDemoPage(w http.ResponseWriter, r *http.Request) {
-	htmlContent, err := ioutil.ReadFile("demo.html")
-	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write(htmlContent)
+	w.Write([]byte(demoHTML))
 }
 
 // 处理WebSocket连接
