@@ -1,9 +1,9 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
 	"flag"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,13 +21,6 @@ import (
 
 // 版本信息
 var Version = "dev"
-
-// 内置静态文件
-//go:embed demo.html
-var demoHTML string
-
-//go:embed main.js
-var mainJS string
 
 // 站点数据结构
 type Site struct {
@@ -121,7 +114,7 @@ func (h *Hub) handleRegister(client *Client) {
 	count := site.Count
 	site.mutex.Unlock()
 
-	log.Printf("客户端 %s 加入站点 %s，在线人数: %d", client.ip, site.ID, count)
+	log.Printf("客户端加入站点 %s，在线: %d", site.ID, count)
 	h.broadcastToSite(site.ID, count)
 }
 
@@ -145,13 +138,12 @@ func (h *Hub) handleUnregister(client *Client) {
 		connectionsLeft := len(site.Connections)
 		site.mutex.Unlock()
 
-		log.Printf("客户端 %s 离开站点 %s，在线人数: %d", client.ip, site.ID, count)
+		log.Printf("客户端离开站点 %s，在线: %d", site.ID, count)
 
 		if connectionsLeft == 0 {
 			h.mutex.Lock()
 			delete(h.sites, site.ID)
 			h.mutex.Unlock()
-			log.Printf("站点 %s 已清理", site.ID)
 		} else {
 			h.broadcastToSite(site.ID, count)
 		}
@@ -203,7 +195,6 @@ func (h *Hub) getSite(siteID string) *Site {
 			Connections: make(map[*Client]bool),
 		}
 		h.sites[siteID] = site
-		log.Printf("创建新站点: %s", siteID)
 	}
 
 	return site
@@ -249,12 +240,17 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 
 // 处理JavaScript文件请求
 func handleJavaScript(w http.ResponseWriter, r *http.Request) {
+	jsTemplate, err := ioutil.ReadFile("main.js")
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
 	config := parseJSConfig(r)
 
-	tmpl, err := template.New("liveuser").Parse(mainJS)
+	tmpl, err := template.New("liveuser").Parse(string(jsTemplate))
 	if err != nil {
-		log.Printf("解析JavaScript模板失败: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
 	}
 
@@ -262,10 +258,7 @@ func handleJavaScript(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 
-	if err := tmpl.Execute(w, config); err != nil {
-		log.Printf("渲染JavaScript模板失败: %v", err)
-		return
-	}
+	tmpl.Execute(w, config)
 }
 
 // 解析JavaScript配置
@@ -331,22 +324,25 @@ func getBoolParam(params url.Values, key string, defaultValue bool) bool {
 
 // 处理演示页面请求
 func handleDemoPage(w http.ResponseWriter, r *http.Request) {
+	htmlContent, err := ioutil.ReadFile("demo.html")
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(demoHTML))
-	log.Printf("返回demo.html给客户端: %s，路径: %s", getRealIP(r), r.URL.Path)
+	w.Write(htmlContent)
 }
 
 // 处理WebSocket连接
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket升级失败: %v", err)
 		return
 	}
 
 	clientIP := getRealIP(r)
-	log.Printf("新WebSocket连接，IP: %s，路径: %s", clientIP, r.URL.Path)
 
 	client := &Client{
 		conn: conn,
@@ -376,15 +372,11 @@ func (c *Client) readPump() {
 	for {
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket异常关闭: %v", err)
-			}
 			break
 		}
 
 		var msg Message
 		if err := json.Unmarshal(msgData, &msg); err != nil {
-			log.Printf("解析消息失败: %v", err)
 			continue
 		}
 
@@ -422,7 +414,6 @@ func (c *Client) writePump() {
 			}
 
 			if err := c.conn.WriteJSON(message); err != nil {
-				log.Printf("发送消息失败: %v", err)
 				return
 			}
 
@@ -454,15 +445,10 @@ func main() {
 
 	// 启动服务器
 	go func() {
-		log.Printf("🚀 LiveUser v%s 服务器启动成功！", Version)
-		log.Printf("📡 监听地址: %s", *addr)
-		log.Printf("🔗 WebSocket: 任意路径支持WebSocket连接")
-		log.Printf("📄 演示页面: 任意路径的HTTP请求都返回演示页面")
-		log.Printf("📜 动态脚本: 任意.js文件请求返回配置化的LiveUser脚本")
-		log.Printf("💡 准备接收连接...")
+		log.Printf("LiveUser v%s 启动成功，监听 %s", Version, *addr)
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ 服务器启动失败: %v", err)
+			log.Fatalf("服务器启动失败: %v", err)
 		}
 	}()
 
@@ -471,7 +457,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("📴 收到关闭信号，正在优雅关闭...")
+	log.Println("正在关闭服务器...")
 
 	// 通知所有客户端即将关闭
 	hub.mutex.RLock()
@@ -480,7 +466,7 @@ func main() {
 		for client := range site.Connections {
 			shutdownMsg := Message{
 				Type:    "shutdown",
-				Message: "服务器即将重启，请稍后重连",
+				Message: "服务器重启中，请稍后重连",
 			}
 			select {
 			case client.send <- shutdownMsg:
@@ -492,5 +478,5 @@ func main() {
 	}
 	hub.mutex.RUnlock()
 
-	log.Println("✅ 服务器已关闭")
+	log.Println("服务器已关闭")
 }
