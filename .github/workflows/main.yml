@@ -216,18 +216,26 @@ jobs:
       - name: 验证 Docker Hub 凭据
         run: |
           if [ -z "${{ secrets.DOCKER_USERNAME }}" ]; then
-            echo "错误: DOCKER_USERNAME secret 未设置"
+            echo "❌ 错误: DOCKER_USERNAME secret 未设置或为空"
+            echo "请在仓库设置中添加 DOCKER_USERNAME secret"
             exit 1
           fi
           if [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
-            echo "错误: DOCKER_PASSWORD secret 未设置"
+            echo "❌ 错误: DOCKER_PASSWORD secret 未设置或为空"
+            echo "请在仓库设置中添加 DOCKER_PASSWORD secret"
             exit 1
           fi
-          echo "Docker Hub 用户名长度: ${#DOCKER_USERNAME}"
-          echo "Docker Hub 密码已设置: $([ -n "$DOCKER_PASSWORD" ] && echo "是" || echo "否")"
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          
+          # 验证用户名格式
+          USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          if [[ ! "$USERNAME" =~ ^[a-z0-9_-]+$ ]]; then
+            echo "❌ 错误: DOCKER_USERNAME 格式无效"
+            echo "Docker Hub 用户名只能包含小写字母、数字、下划线和短横线"
+            exit 1
+          fi
+          
+          echo "✅ Docker Hub 凭据验证通过"
+          echo "用户名长度: ${#USERNAME} 字符"
 
       - name: 设置 QEMU
         uses: docker/setup-qemu-action@v3
