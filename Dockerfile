@@ -7,7 +7,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 # 设置工作目录
 WORKDIR /app
 
-# 复制源代码
+# 复制源代码（包含静态文件）
 COPY . .
 
 # 初始化 Go 模块
@@ -17,7 +17,7 @@ RUN if [ ! -f go.mod ]; then \
     go get github.com/gorilla/websocket@latest && \
     go mod tidy
 
-# 构建应用
+# 构建应用（静态文件会自动内置）
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
@@ -37,10 +37,8 @@ RUN adduser -D -s /bin/sh liveuser
 # 设置工作目录
 WORKDIR /app
 
-# 复制二进制文件和静态文件
+# 只需要复制二进制文件（静态文件已内置）
 COPY --from=builder /app/liveuser .
-COPY --from=builder /app/main.js .
-COPY --from=builder /app/demo.html .
 
 # 设置权限
 RUN chown -R liveuser:liveuser /app
