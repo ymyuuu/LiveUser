@@ -34,8 +34,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # 最终镜像
 FROM alpine:latest
 
-# 安装ca证书和时区数据
-RUN apk --no-cache add ca-certificates tzdata
+# 安装ca证书、时区数据和 wget（用于健康检查）
+RUN apk --no-cache add ca-certificates tzdata wget
 
 # 创建非root用户
 RUN adduser -D -s /bin/sh liveuser
@@ -53,12 +53,15 @@ COPY --from=builder /app/main.js /app/demo.html ./
 RUN chown -R liveuser:liveuser /app
 USER liveuser
 
-# 暴露端口
+# 暴露默认端口（可通过运行时参数修改）
 EXPOSE 10086
 
-# 健康检查
+# 环境变量（可被运行时覆盖）
+ENV PORT=10086
+
+# 健康检查（默认端口 10086，如使用自定义端口请在运行时禁用）
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:10086/ || exit 1
 
-# 启动应用
+# 启动应用（使用环境变量，也可通过 docker run 时传递 -addr 参数覆盖）
 CMD ["./liveuser"]
