@@ -204,9 +204,8 @@
                 return;
             }
             
-            // 自动识别协议和服务器地址
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const serverUrl = protocol + '//' + window.location.host + '/';
+            // 从当前脚本的src地址中获取服务器地址
+            const serverUrl = this.getServerUrl();
             
             this.log('连接 WebSocket: ' + serverUrl);
             
@@ -245,6 +244,28 @@
                 this.log('连接失败: ' + err.message);
                 this.scheduleReconnect();
             }
+        }
+        
+        getServerUrl() {
+            // 尝试从当前脚本标签获取服务器地址
+            const scripts = document.getElementsByTagName('script');
+            for (let i = scripts.length - 1; i >= 0; i--) {
+                const script = scripts[i];
+                if (script.src && script.src.includes('liveuser.js')) {
+                    try {
+                        const url = new URL(script.src);
+                        const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+                        return protocol + '//' + url.host + '/';
+                    } catch (err) {
+                        this.log('解析脚本URL失败: ' + err.message);
+                    }
+                    break;
+                }
+            }
+            
+            // 降级方案：使用当前页面的地址
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return protocol + '//' + window.location.host + '/';
         }
         
         handleMessage(data) {
