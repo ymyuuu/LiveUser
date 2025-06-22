@@ -49,6 +49,7 @@ jobs:
               exit 1
             fi
           done
+          echo "✅ 静态文件将内置到二进制中"
 
       - name: 代码检查
         run: |
@@ -152,6 +153,7 @@ jobs:
             binary_name="${binary_name}.exe"
           fi
           
+          echo "🔨 构建 ${{ matrix.os }}/${{ matrix.arch }} 平台"
           go build \
             -trimpath \
             -ldflags="-s -w -X main.Version=${VERSION}" \
@@ -161,10 +163,13 @@ jobs:
           mkdir -p dist
           package_name="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}"
           
+          # 只打包二进制文件（静态文件已内置）
           if [ "${{ matrix.os }}" = "windows" ]; then
-            zip -9 "dist/${package_name}.zip" "${binary_name}" main.js demo.html
+            zip -9 "dist/${package_name}.zip" "${binary_name}"
+            echo "✅ 已创建: ${package_name}.zip"
           else
-            tar -czf "dist/${package_name}.tar.gz" "${binary_name}" main.js demo.html
+            tar -czf "dist/${package_name}.tar.gz" "${binary_name}"
+            echo "✅ 已创建: ${package_name}.tar.gz"
           fi
 
       - name: 上传构建产物
@@ -190,11 +195,19 @@ jobs:
       - name: 整理发布文件
         run: |
           mkdir -p release
+          echo "📥 收集构建产物"
           find artifacts -name "*.zip" -o -name "*.tar.gz" | while read file; do
-            cp "$file" release/
+            filename=$(basename "$file")
+            cp "$file" "release/$filename"
+            echo "✅ 已添加: $filename"
           done
+          
+          echo "🔒 生成 SHA256 校验和"
           cd release
           sha256sum *.zip *.tar.gz > checksums.txt 2>/dev/null || sha256sum * > checksums.txt
+          
+          echo "📋 发布清单:"
+          ls -lh
 
       - name: 生成发布说明
         run: |
@@ -242,6 +255,7 @@ jobs:
       - name: 构建并推送镜像 (Beta)
         if: ${{ needs.version.outputs.is_release != 'true' }}
         run: |
+          echo "🐳 构建 Docker 镜像 (预发布版)"
           docker buildx build \
             --build-arg VERSION="${{ needs.version.outputs.version }}" \
             --platform linux/amd64,linux/arm64 \
@@ -249,10 +263,12 @@ jobs:
             --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:beta" \
             --push \
             .
+          echo "✅ Docker 镜像推送完成"
 
       - name: 构建并推送镜像 (Release)
         if: ${{ needs.version.outputs.is_release == 'true' }}
         run: |
+          echo "🐳 构建 Docker 镜像 (正式版)"
           docker buildx build \
             --build-arg VERSION="${{ needs.version.outputs.version }}" \
             --platform linux/amd64,linux/arm64 \
@@ -260,3 +276,4 @@ jobs:
             --tag "${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest" \
             --push \
             .
+          echo "✅ Docker 镜像推送完成"
