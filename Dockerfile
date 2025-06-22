@@ -7,14 +7,19 @@ RUN apk add --no-cache git ca-certificates tzdata
 # 设置工作目录
 WORKDIR /app
 
-# 复制 go mod 文件
-COPY go.mod go.sum ./
-
-# 下载依赖
-RUN go mod download
-
 # 复制源代码
 COPY . .
+
+# 初始化 Go 模块（如果不存在）
+RUN if [ ! -f go.mod ]; then \
+        go mod init github.com/temp/liveuser; \
+    fi
+
+# 添加依赖
+RUN go get github.com/gorilla/websocket@latest
+
+# 整理依赖
+RUN go mod tidy
 
 # 构建应用
 ARG VERSION=dev
@@ -42,7 +47,7 @@ WORKDIR /app
 COPY --from=builder /app/liveuser .
 
 # 复制必要的静态文件
-COPY main.js demo.html ./
+COPY --from=builder /app/main.js /app/demo.html ./
 
 # 修改文件权限
 RUN chown -R liveuser:liveuser /app
