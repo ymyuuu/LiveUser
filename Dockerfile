@@ -7,7 +7,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 # 设置工作目录
 WORKDIR /app
 
-# 复制源代码
+# 复制源代码（包含内置的静态文件）
 COPY . .
 
 # 初始化 Go 模块（如果不存在）
@@ -43,11 +43,8 @@ RUN adduser -D -s /bin/sh liveuser
 # 设置工作目录
 WORKDIR /app
 
-# 从构建阶段复制二进制文件
+# 从构建阶段复制二进制文件（静态文件已内置，无需单独复制）
 COPY --from=builder /app/liveuser .
-
-# 复制必要的静态文件
-COPY --from=builder /app/main.js /app/demo.html ./
 
 # 修改文件权限
 RUN chown -R liveuser:liveuser /app
