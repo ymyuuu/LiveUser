@@ -65,11 +65,11 @@ type Message struct {
 
 // JavaScript 配置结构
 type JSConfig struct {
+	ServerURL        string `json:"serverUrl"`
 	SiteID           string `json:"siteId"`
 	DisplayElementID string `json:"displayElementId"`
 	ReconnectDelay   int    `json:"reconnectDelay"`
 	Debug            bool   `json:"debug"`
-	Type             string `json:"type"`
 }
 
 // WebSocket 升级器
@@ -266,12 +266,18 @@ func handleJavaScript(w http.ResponseWriter, r *http.Request) {
 func parseJSConfig(r *http.Request) JSConfig {
 	params := r.URL.Query()
 
+	protocol := "ws"
+	if r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil {
+		protocol = "wss"
+	}
+	defaultServerURL := protocol + "://" + r.Host + "/"
+
 	config := JSConfig{
+		ServerURL:        getParam(params, "serverUrl", defaultServerURL),
 		SiteID:           getParam(params, "siteId", ""),
 		DisplayElementID: getParam(params, "displayElementId", "liveuser"),
 		ReconnectDelay:   getIntParam(params, "reconnectDelay", 3000),
 		Debug:            getBoolParam(params, "debug", true),
-		Type:             getParam(params, "type", "all"),
 	}
 
 	if config.SiteID == "" {
