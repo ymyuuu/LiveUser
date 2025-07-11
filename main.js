@@ -1,7 +1,7 @@
 (function() {
     'use strict';
-
-    // 配置参数（由服务器模板注入）
+    
+    // 配置信息（由服务端注入）
     const config = {
         serverUrl: '{{.ServerURL}}',
         siteId: '{{.SiteID}}',
@@ -9,304 +9,290 @@
         reconnectDelay: {{.ReconnectDelay}},
         debug: {{.Debug}}
     };
-
-    // 全局变量
+    
+    // 全局状态
     let ws = null;
     let sessionId = null;
-    let verified = false;
+    let isVerified = false;
     let reconnectTimer = null;
-    let activityTimer = null;
+    let heartbeatTimer = null;
     let behaviorDetected = false;
-
-    // 生成唯一会话ID
-    function generateSessionId() {
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(2, 15);
-        const browserInfo = btoa(navigator.userAgent.substring(0, 20)).substring(0, 8);
-        return `${timestamp}-${random}-${browserInfo}`;
-    }
-
-    // 获取或创建会话ID
-    function getSessionId() {
-        if (sessionId) return sessionId;
-        
-        // 尝试从localStorage获取（24小时有效）
-        const stored = localStorage.getItem('liveuser_session');
-        if (stored) {
-            try {
-                const data = JSON.parse(stored);
-                const now = Date.now();
-                if (now - data.created < 24 * 60 * 60 * 1000) { // 24小时内有效
-                    sessionId = data.sessionId;
-                    return sessionId;
-                }
-            } catch (e) {
-                // 解析失败，删除旧数据
-                localStorage.removeItem('liveuser_session');
-            }
-        }
-
-        // 生成新的会话ID
-        sessionId = generateSessionId();
-        localStorage.setItem('liveuser_session', JSON.stringify({
-            sessionId: sessionId,
-            created: Date.now()
-        }));
-        
-        return sessionId;
-    }
-
-    // 日志输出
+    let interactionCount = 0;
+    
+    // 日志函数
     function log(message) {
         if (config.debug) {
             console.log('[LiveUser]', message);
         }
     }
-
-    // 更新显示的人数
-    function updateDisplay(count) {
-        const element = document.getElementById(config.displayElementId);
-        if (element) {
-            // 添加更新动画效果
-            element.classList.add('updating');
-            element.textContent = count;
-            
-            setTimeout(() => {
-                element.classList.remove('updating');
-            }, 300);
-        }
+    
+    // 生成会话ID
+    function generateSessionId() {
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 15);
+        const browser = btoa(navigator.userAgent.substring(0, 20)).substring(0, 8);
+        return `${timestamp}-${random}-${browser}`;
     }
-
-    // 发送消息到服务器
-    function sendMessage(message) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(message));
-            return true;
-        }
-        return false;
-    }
-
-    // 行为检测器
-    function setupBehaviorDetection() {
-        let detected = false;
+    
+    // 获取或创建会话ID
+    function getSessionId() {
+        if (sessionId) return sessionId;
         
-        function markBehaviorDetected() {
-            if (!detected && !verified) {
-                detected = true;
+        // 尝试从localStorage获取
+        try {
+            const stored = localStorage.getItem('liveuser_session');
+            if (stored) {
+                const session = JSON.parse(stored);
+                // 检查是否过期（24小时）
+                if (Date.now() - session.created < 24 * 60 * 60 * 1000) {
+                    sessionId = session.id;
+                    log(`恢复会话: ${sessionId.substring(0, 8)}...`);
+                    return sessionId;
+                }
+            }
+        } catch (e) {
+            log('无法读取localStorage');
+        }
+        
+        // 生成新的会话ID
+        sessionId = generateSessionId();
+        
+        // 保存到localStorage
+        try {
+            localStorage.setItem('liveuser_session', JSON.stringify({
+                id: sessionId,
+                created: Date.now()
+            }));
+        } catch (e) {
+            log('无法写入localStorage');
+        }
+        
+        log(`创建新会话: ${sessionId.substring(0, 8)}...`);
+        return sessionId;
+    }
+    
+    // 行为检测器
+    const BehaviorDetector = {
+        init() {
+            this.setupListeners();
+            log('行为检测器已启动');
+        },
+        
+        setupListeners() {
+            // 鼠标移动
+            document.addEventListener('mousemove', this.onInteraction.bind(this), { passive: true });
+            
+            // 鼠标点击
+            document.addEventListener('click', this.onInteraction.bind(this), { passive: true });
+            
+            // 键盘输入
+            document.addEventListener('keydown', this.onInteraction.bind(this), { passive: true });
+            
+            // 滚动
+            document.addEventListener('scroll', this.onInteraction.bind(this), { passive: true });
+            
+            // 触摸事件（移动端）
+            document.addEventListener('touchstart', this.onInteraction.bind(this), { passive: true });
+            document.addEventListener('touchmove', this.onInteraction.bind(this), { passive: true });
+            
+            // 窗口焦点
+            window.addEventListener('focus', this.onInteraction.bind(this), { passive: true });
+            
+            // 页面可见性变化
+            document.addEventListener('visibilitychange', this.onVisibilityChange.bind(this));
+        },
+        
+        onInteraction() {
+            if (!behaviorDetected) {
                 behaviorDetected = true;
-                log('检测到用户行为，发送验证请求');
-                
-                // 发送验证消息
-                sendMessage({
+                interactionCount++;
+                log(`检测到用户交互 (#${interactionCount})`);
+                this.sendVerification();
+            } else {
+                // 已验证用户的额外交互
+                interactionCount++;
+                if (interactionCount % 10 === 0) {
+                    log(`用户持续活跃 (#${interactionCount})`);
+                    this.sendVerification();
+                }
+            }
+        },
+        
+        onVisibilityChange() {
+            if (!document.hidden) {
+                // 页面重新可见
+                this.onInteraction();
+            }
+        },
+        
+        sendVerification() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const message = {
                     type: 'verify',
                     sessionId: getSessionId(),
                     timestamp: Date.now()
-                });
+                };
+                ws.send(JSON.stringify(message));
+                log('发送行为验证');
             }
         }
-
-        // 检测各种用户行为
-        const events = [
-            'mousemove', 'mousedown', 'mouseup', 'click',
-            'keydown', 'keyup', 'keypress',
-            'scroll', 'wheel',
-            'touchstart', 'touchmove', 'touchend',
-            'focus', 'blur'
-        ];
-
-        events.forEach(event => {
-            document.addEventListener(event, markBehaviorDetected, { 
-                once: false, 
-                passive: true 
-            });
-        });
-
-        // 页面可见性变化检测
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                markBehaviorDetected();
+    };
+    
+    // WebSocket管理器
+    const WSManager = {
+        connect() {
+            if (ws && ws.readyState === WebSocket.CONNECTING) {
+                return;
             }
-        });
-
-        log('行为检测器已启动');
-    }
-
-    // 启动活动心跳
-    function startActivityHeartbeat() {
-        if (activityTimer) {
-            clearInterval(activityTimer);
-        }
-
-        activityTimer = setInterval(() => {
-            if (verified && ws && ws.readyState === WebSocket.OPEN) {
-                sendMessage({
-                    type: 'activity',
-                    sessionId: getSessionId(),
-                    timestamp: Date.now()
-                });
-            }
-        }, 30000); // 每30秒发送一次心跳
-    }
-
-    // 停止活动心跳
-    function stopActivityHeartbeat() {
-        if (activityTimer) {
-            clearInterval(activityTimer);
-            activityTimer = null;
-        }
-    }
-
-    // 连接到WebSocket服务器
-    function connect() {
-        if (ws) {
-            ws.close();
-        }
-
-        const wsUrl = config.serverUrl.replace(/^http/, 'ws');
-        log(`连接到 ${wsUrl}`);
-
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = function() {
+            
+            log(`连接到 ${config.serverUrl}`);
+            ws = new WebSocket(config.serverUrl);
+            
+            ws.onopen = this.onOpen.bind(this);
+            ws.onmessage = this.onMessage.bind(this);
+            ws.onclose = this.onClose.bind(this);
+            ws.onerror = this.onError.bind(this);
+        },
+        
+        onOpen() {
             log('WebSocket连接已建立');
-            verified = false;
             
             // 发送加入消息
-            sendMessage({
+            const message = {
                 type: 'join',
                 siteId: config.siteId,
-                sessionId: getSessionId(),
-                timestamp: Date.now()
-            });
-
-            // 如果已经检测到行为，立即发送验证
-            if (behaviorDetected) {
-                setTimeout(() => {
-                    sendMessage({
-                        type: 'verify',
+                sessionId: getSessionId()
+            };
+            ws.send(JSON.stringify(message));
+            
+            // 启动心跳
+            this.startHeartbeat();
+            
+            // 清除重连定时器
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+        },
+        
+        onMessage(event) {
+            try {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'update':
+                        this.updateDisplay(message.count);
+                        break;
+                        
+                    case 'needVerify':
+                        log('服务器请求行为验证');
+                        // 等待用户交互
+                        break;
+                        
+                    case 'shutdown':
+                        log('服务器通知：' + message.message);
+                        break;
+                        
+                    default:
+                        log('未知消息类型：' + message.type);
+                }
+            } catch (e) {
+                log('解析消息失败：' + e.message);
+            }
+        },
+        
+        onClose() {
+            log('WebSocket连接已关闭');
+            this.stopHeartbeat();
+            this.scheduleReconnect();
+        },
+        
+        onError(error) {
+            log('WebSocket错误：' + error);
+        },
+        
+        startHeartbeat() {
+            this.stopHeartbeat();
+            heartbeatTimer = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const message = {
+                        type: 'heartbeat',
                         sessionId: getSessionId(),
                         timestamp: Date.now()
-                    });
-                }, 100);
-            }
-        };
-
-        ws.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                handleMessage(data);
-            } catch (e) {
-                log('消息解析错误:', e);
-            }
-        };
-
-        ws.onclose = function(event) {
-            log('WebSocket连接已关闭:', event.code, event.reason);
-            verified = false;
-            stopActivityHeartbeat();
-            
-            // 非正常关闭时自动重连
-            if (event.code !== 1000) {
-                scheduleReconnect();
-            }
-        };
-
-        ws.onerror = function(error) {
-            log('WebSocket错误:', error);
-        };
-    }
-
-    // 处理服务器消息
-    function handleMessage(data) {
-        switch (data.type) {
-            case 'update':
-                log(`收到人数更新: ${data.count}`);
-                updateDisplay(data.count);
-                break;
-
-            case 'requestVerification':
-                log('服务器请求验证，等待用户行为...');
-                break;
-
-            case 'verified':
-                log('用户验证成功');
-                verified = true;
-                startActivityHeartbeat();
-                break;
-
-            case 'shutdown':
-                log('服务器通知关闭:', data.message);
-                if (ws) {
-                    ws.close();
+                    };
+                    ws.send(JSON.stringify(message));
+                    log('发送心跳');
                 }
-                break;
-
-            default:
-                log('未知消息类型:', data.type);
-        }
-    }
-
-    // 计划重连
-    function scheduleReconnect() {
-        if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-        }
-
-        reconnectTimer = setTimeout(() => {
-            log('尝试重新连接...');
-            connect();
-        }, config.reconnectDelay);
-    }
-
-    // 清理资源
-    function cleanup() {
-        if (ws) {
-            ws.close();
-            ws = null;
-        }
-        if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-        }
-        stopActivityHeartbeat();
-    }
-
-    // 页面卸载时清理
-    window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('unload', cleanup);
-
-    // 页面可见性变化处理
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            // 页面隐藏时断开连接以释放资源
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.close();
+            }, 30000); // 30秒心跳
+        },
+        
+        stopHeartbeat() {
+            if (heartbeatTimer) {
+                clearInterval(heartbeatTimer);
+                heartbeatTimer = null;
             }
-        } else {
-            // 页面重新可见时重连
-            if (!ws || ws.readyState === WebSocket.CLOSED) {
-                connect();
+        },
+        
+        scheduleReconnect() {
+            if (reconnectTimer) return;
+            
+            log(`${config.reconnectDelay/1000}秒后重连`);
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                this.connect();
+            }, config.reconnectDelay);
+        },
+        
+        updateDisplay(count) {
+            const element = document.getElementById(config.displayElementId);
+            if (element) {
+                // 添加更新动画
+                element.classList.add('updating');
+                setTimeout(() => {
+                    element.classList.remove('updating');
+                }, 300);
+                
+                element.textContent = count;
+                log(`更新显示：${count} 人在线`);
             }
         }
-    });
-
+    };
+    
     // 初始化
     function init() {
-        log('LiveUser 精确统计版本启动');
-        log('配置:', config);
+        log('LiveUser 客户端启动');
+        log(`站点ID: ${config.siteId}`);
+        log(`会话ID: ${getSessionId().substring(0, 8)}...`);
         
-        // 设置行为检测
-        setupBehaviorDetection();
+        // 初始化行为检测
+        BehaviorDetector.init();
         
-        // 连接到服务器
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', connect);
-        } else {
-            connect();
-        }
+        // 连接WebSocket
+        WSManager.connect();
+        
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            if (ws) {
+                ws.close();
+            }
+        });
     }
-
-    // 启动
-    init();
-
+    
+    // 等待DOM加载完成
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    
+    // 暴露到全局（用于调试）
+    if (config.debug) {
+        window.LiveUser = {
+            getSessionId,
+            getBehaviorDetected: () => behaviorDetected,
+            getInteractionCount: () => interactionCount,
+            getConnectionState: () => ws ? ws.readyState : -1,
+            forceVerify: () => BehaviorDetector.sendVerification()
+        };
+    }
 })();
