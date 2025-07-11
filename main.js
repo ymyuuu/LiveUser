@@ -1,255 +1,312 @@
-/**
- * LiveUser 实时在线人数统计
- * 使用方法：
- * <span id="liveuser">加载中...</span>
- * <script src="https://your-domain.com/liveuser.js"></script>
- */
 (function() {
     'use strict';
-    
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-        console.warn('[LiveUser] 需要在浏览器环境中运行');
-        return;
-    }
-    
-    // 配置项（由服务器动态生成）
-    const CONFIG = {
+
+    // 配置参数（由服务器模板注入）
+    const config = {
         serverUrl: '{{.ServerURL}}',
         siteId: '{{.SiteID}}',
         displayElementId: '{{.DisplayElementID}}',
         reconnectDelay: {{.ReconnectDelay}},
         debug: {{.Debug}}
     };
-    
-    // LiveUser 核心类
-    class LiveUser {
-        constructor() {
-            this.ws = null;
-            this.isActive = true;
-            this.reconnectTimer = null;
-            this.currentCount = 0;
-            this.displayElement = document.getElementById(CONFIG.displayElementId);
-            
-            this.init();
-        }
+
+    // 全局变量
+    let ws = null;
+    let sessionId = null;
+    let verified = false;
+    let reconnectTimer = null;
+    let activityTimer = null;
+    let behaviorDetected = false;
+
+    // 生成唯一会话ID
+    function generateSessionId() {
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 15);
+        const browserInfo = btoa(navigator.userAgent.substring(0, 20)).substring(0, 8);
+        return `${timestamp}-${random}-${browserInfo}`;
+    }
+
+    // 获取或创建会话ID
+    function getSessionId() {
+        if (sessionId) return sessionId;
         
-        init() {
-            this.log('LiveUser 初始化，站点: ' + CONFIG.siteId);
-            this.checkDisplayElement();
-            this.setupEventListeners();
-            this.connect();
-        }
-        
-        checkDisplayElement() {
-            if (!this.displayElement) {
-                this.log('警告: 找不到元素 #' + CONFIG.displayElementId);
-            }
-        }
-        
-        setupEventListeners() {
-            // 页面可见性变化
-            if (typeof document !== 'undefined' && 'visibilitychange' in document) {
-                document.addEventListener('visibilitychange', () => {
-                    this.isActive = !document.hidden;
-                    if (this.isActive && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
-                        this.connect();
-                    }
-                });
-            }
-            
-            // 页面卸载清理
-            if (typeof window !== 'undefined') {
-                window.addEventListener('beforeunload', () => {
-                    this.isActive = false;
-                    if (this.ws) {
-                        this.ws.close(1000, '页面关闭');
-                    }
-                });
-            }
-            
-            // 网络状态监听
-            if (typeof navigator !== 'undefined' && 'onLine' in navigator) {
-                window.addEventListener('online', () => {
-                    this.log('网络恢复');
-                    this.connect();
-                });
-            }
-        }
-        
-        connect() {
-            if (this.reconnectTimer) {
-                clearTimeout(this.reconnectTimer);
-                this.reconnectTimer = null;
-            }
-            
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                return;
-            }
-            
-            this.log('连接 WebSocket: ' + CONFIG.serverUrl);
-            
+        // 尝试从localStorage获取（24小时有效）
+        const stored = localStorage.getItem('liveuser_session');
+        if (stored) {
             try {
-                this.ws = new WebSocket(CONFIG.serverUrl);
-                
-                this.ws.onopen = () => {
-                    this.log('连接成功');
-                    this.ws.send(JSON.stringify({
-                        type: 'join',
-                        siteId: CONFIG.siteId
-                    }));
-                };
-                
-                this.ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        this.handleMessage(data);
-                    } catch (err) {
-                        this.log('解析消息失败: ' + err.message);
-                    }
-                };
-                
-                this.ws.onclose = (event) => {
-                    this.log('连接关闭: ' + event.code);
-                    if (this.isActive) {
-                        this.scheduleReconnect();
-                    }
-                };
-                
-                this.ws.onerror = () => {
-                    this.log('连接错误');
-                };
-                
-            } catch (err) {
-                this.log('连接失败: ' + err.message);
-                this.scheduleReconnect();
+                const data = JSON.parse(stored);
+                const now = Date.now();
+                if (now - data.created < 24 * 60 * 60 * 1000) { // 24小时内有效
+                    sessionId = data.sessionId;
+                    return sessionId;
+                }
+            } catch (e) {
+                // 解析失败，删除旧数据
+                localStorage.removeItem('liveuser_session');
             }
         }
+
+        // 生成新的会话ID
+        sessionId = generateSessionId();
+        localStorage.setItem('liveuser_session', JSON.stringify({
+            sessionId: sessionId,
+            created: Date.now()
+        }));
         
-        handleMessage(data) {
-            switch (data.type) {
-                case 'update':
-                    if (data.siteId === CONFIG.siteId) {
-                        this.updateCount(data.count);
-                    }
-                    break;
-                case 'shutdown':
-                    this.log('服务器通知: ' + (data.message || '服务器维护'));
-                    break;
-            }
+        return sessionId;
+    }
+
+    // 日志输出
+    function log(message) {
+        if (config.debug) {
+            console.log('[LiveUser]', message);
         }
-        
-        updateCount(count) {
-            const oldCount = this.currentCount;
-            this.currentCount = count;
+    }
+
+    // 更新显示的人数
+    function updateDisplay(count) {
+        const element = document.getElementById(config.displayElementId);
+        if (element) {
+            // 添加更新动画效果
+            element.classList.add('updating');
+            element.textContent = count;
             
-            if (this.displayElement) {
-                this.displayElement.classList.add('updating');
-                this.displayElement.textContent = count;
+            setTimeout(() => {
+                element.classList.remove('updating');
+            }, 300);
+        }
+    }
+
+    // 发送消息到服务器
+    function sendMessage(message) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(message));
+            return true;
+        }
+        return false;
+    }
+
+    // 行为检测器
+    function setupBehaviorDetection() {
+        let detected = false;
+        
+        function markBehaviorDetected() {
+            if (!detected && !verified) {
+                detected = true;
+                behaviorDetected = true;
+                log('检测到用户行为，发送验证请求');
                 
+                // 发送验证消息
+                sendMessage({
+                    type: 'verify',
+                    sessionId: getSessionId(),
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        // 检测各种用户行为
+        const events = [
+            'mousemove', 'mousedown', 'mouseup', 'click',
+            'keydown', 'keyup', 'keypress',
+            'scroll', 'wheel',
+            'touchstart', 'touchmove', 'touchend',
+            'focus', 'blur'
+        ];
+
+        events.forEach(event => {
+            document.addEventListener(event, markBehaviorDetected, { 
+                once: false, 
+                passive: true 
+            });
+        });
+
+        // 页面可见性变化检测
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                markBehaviorDetected();
+            }
+        });
+
+        log('行为检测器已启动');
+    }
+
+    // 启动活动心跳
+    function startActivityHeartbeat() {
+        if (activityTimer) {
+            clearInterval(activityTimer);
+        }
+
+        activityTimer = setInterval(() => {
+            if (verified && ws && ws.readyState === WebSocket.OPEN) {
+                sendMessage({
+                    type: 'activity',
+                    sessionId: getSessionId(),
+                    timestamp: Date.now()
+                });
+            }
+        }, 30000); // 每30秒发送一次心跳
+    }
+
+    // 停止活动心跳
+    function stopActivityHeartbeat() {
+        if (activityTimer) {
+            clearInterval(activityTimer);
+            activityTimer = null;
+        }
+    }
+
+    // 连接到WebSocket服务器
+    function connect() {
+        if (ws) {
+            ws.close();
+        }
+
+        const wsUrl = config.serverUrl.replace(/^http/, 'ws');
+        log(`连接到 ${wsUrl}`);
+
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function() {
+            log('WebSocket连接已建立');
+            verified = false;
+            
+            // 发送加入消息
+            sendMessage({
+                type: 'join',
+                siteId: config.siteId,
+                sessionId: getSessionId(),
+                timestamp: Date.now()
+            });
+
+            // 如果已经检测到行为，立即发送验证
+            if (behaviorDetected) {
                 setTimeout(() => {
-                    if (this.displayElement) {
-                        this.displayElement.classList.remove('updating');
-                    }
-                }, 300);
-                
-                this.log('更新人数: ' + oldCount + ' -> ' + count);
-            } else {
-                this.displayElement = document.getElementById(CONFIG.displayElementId);
-            }
-            
-            // 触发自定义事件
-            if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
-                try {
-                    const event = new CustomEvent('liveuser:update', {
-                        detail: { count: count, oldCount: oldCount, siteId: CONFIG.siteId }
+                    sendMessage({
+                        type: 'verify',
+                        sessionId: getSessionId(),
+                        timestamp: Date.now()
                     });
-                    window.dispatchEvent(event);
-                } catch (err) {
-                    // 忽略事件触发错误
-                }
+                }, 100);
             }
-        }
-        
-        scheduleReconnect() {
-            if (this.reconnectTimer || !this.isActive) {
-                return;
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            } catch (e) {
+                log('消息解析错误:', e);
             }
+        };
+
+        ws.onclose = function(event) {
+            log('WebSocket连接已关闭:', event.code, event.reason);
+            verified = false;
+            stopActivityHeartbeat();
             
-            this.log('将在 ' + (CONFIG.reconnectDelay / 1000) + ' 秒后重连');
-            this.reconnectTimer = setTimeout(() => {
-                this.reconnectTimer = null;
-                if (this.isActive) {
-                    this.connect();
+            // 非正常关闭时自动重连
+            if (event.code !== 1000) {
+                scheduleReconnect();
+            }
+        };
+
+        ws.onerror = function(error) {
+            log('WebSocket错误:', error);
+        };
+    }
+
+    // 处理服务器消息
+    function handleMessage(data) {
+        switch (data.type) {
+            case 'update':
+                log(`收到人数更新: ${data.count}`);
+                updateDisplay(data.count);
+                break;
+
+            case 'requestVerification':
+                log('服务器请求验证，等待用户行为...');
+                break;
+
+            case 'verified':
+                log('用户验证成功');
+                verified = true;
+                startActivityHeartbeat();
+                break;
+
+            case 'shutdown':
+                log('服务器通知关闭:', data.message);
+                if (ws) {
+                    ws.close();
                 }
-            }, CONFIG.reconnectDelay);
-        }
-        
-        getCount() {
-            return this.currentCount;
-        }
-        
-        getStatus() {
-            if (!this.ws) return 'disconnected';
-            const states = {
-                [WebSocket.CONNECTING]: 'connecting',
-                [WebSocket.OPEN]: 'connected',
-                [WebSocket.CLOSING]: 'closing',
-                [WebSocket.CLOSED]: 'closed'
-            };
-            return states[this.ws.readyState] || 'unknown';
-        }
-        
-        disconnect() {
-            this.isActive = false;
-            if (this.reconnectTimer) {
-                clearTimeout(this.reconnectTimer);
-                this.reconnectTimer = null;
-            }
-            if (this.ws) {
-                this.ws.close(1000, '手动断开');
-                this.ws = null;
-            }
-        }
-        
-        reconnect() {
-            this.isActive = true;
-            this.connect();
-        }
-        
-        log(message) {
-            if (CONFIG.debug) {
-                console.log('[LiveUser] ' + message);
-            }
+                break;
+
+            default:
+                log('未知消息类型:', data.type);
         }
     }
-    
-    // 初始化
-    function initLiveUser() {
-        if (typeof document === 'undefined') {
-            return;
+
+    // 计划重连
+    function scheduleReconnect() {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
         }
-        
-        if (typeof window !== 'undefined') {
-            window.LiveUser = new LiveUser();
-            
-            // 全局方法
-            window.getLiveUserCount = function() {
-                return window.LiveUser ? window.LiveUser.getCount() : 0;
-            };
-            
-            window.getLiveUserStatus = function() {
-                return window.LiveUser ? window.LiveUser.getStatus() : 'not-initialized';
-            };
-        }
+
+        reconnectTimer = setTimeout(() => {
+            log('尝试重新连接...');
+            connect();
+        }, config.reconnectDelay);
     }
-    
-    // 等待 DOM 加载
-    if (typeof document !== 'undefined') {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initLiveUser);
+
+    // 清理资源
+    function cleanup() {
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        stopActivityHeartbeat();
+    }
+
+    // 页面卸载时清理
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('unload', cleanup);
+
+    // 页面可见性变化处理
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // 页面隐藏时断开连接以释放资源
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
         } else {
-            initLiveUser();
+            // 页面重新可见时重连
+            if (!ws || ws.readyState === WebSocket.CLOSED) {
+                connect();
+            }
+        }
+    });
+
+    // 初始化
+    function init() {
+        log('LiveUser 精确统计版本启动');
+        log('配置:', config);
+        
+        // 设置行为检测
+        setupBehaviorDetection();
+        
+        // 连接到服务器
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', connect);
+        } else {
+            connect();
         }
     }
-    
+
+    // 启动
+    init();
+
 })();
