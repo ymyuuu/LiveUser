@@ -29,21 +29,31 @@ var demoHTML string
 //go:embed main.js
 var mainJS string
 
+// 用户会话结构
+type UserSession struct {
+	SessionID    string    `json:"sessionId"`
+	IsVerified   bool      `json:"isVerified"`    // 是否通过行为验证
+	LastActivity time.Time `json:"lastActivity"` // 最后活动时间
+	CreatedAt    time.Time `json:"createdAt"`    // 创建时间
+}
+
 // 站点数据结构
 type Site struct {
-	ID          string           `json:"id"`
-	Count       int              `json:"count"`
-	Connections map[*Client]bool `json:"-"`
-	mutex       sync.RWMutex     `json:"-"`
+	ID          string                 `json:"id"`
+	Count       int                    `json:"count"`       // 真实在线人数
+	Connections map[*Client]bool       `json:"-"`           // 所有连接
+	Sessions    map[string]*UserSession `json:"-"`          // 验证过的用户会话
+	mutex       sync.RWMutex           `json:"-"`
 }
 
 // 客户端连接
 type Client struct {
-	conn *websocket.Conn
-	site *Site
-	hub  *Hub
-	send chan Message
-	ip   string
+	conn      *websocket.Conn
+	site      *Site
+	hub       *Hub
+	send      chan Message
+	sessionID string
+	verified  bool
 }
 
 // 连接管理器
@@ -51,6 +61,8 @@ type Hub struct {
 	sites      map[string]*Site
 	register   chan *Client
 	unregister chan *Client
+	verify     chan *Client  // 用户验证通道
+	activity   chan *Client  // 用户活动通道
 	mutex      sync.RWMutex
 }
 
@@ -60,6 +72,7 @@ type Message struct {
 	SiteID    string `json:"siteId,omitempty"`
 	Count     int    `json:"count,omitempty"`
 	Message   string `json:"message,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
 	Timestamp int64  `json:"timestamp,omitempty"`
 }
 
@@ -93,22 +106,31 @@ func NewHub() *Hub {
 		sites:      make(map[string]*Site),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		verify:     make(chan *Client),
+		activity:   make(chan *Client),
 	}
 }
 
 // Hub 主循环
 func (h *Hub) Run() {
+	// 启动清理协程
+	go h.cleanupLoop()
+	
 	for {
 		select {
 		case client := <-h.register:
 			h.handleRegister(client)
 		case client := <-h.unregister:
 			h.handleUnregister(client)
+		case client := <-h.verify:
+			h.handleVerify(client)
+		case client := <-h.activity:
+			h.handleActivity(client)
 		}
 	}
 }
 
-// 处理客户端注册
+// 处理客户端注册（连接但不计数）
 func (h *Hub) handleRegister(client *Client) {
 	if client.site == nil {
 		return
@@ -117,12 +139,72 @@ func (h *Hub) handleRegister(client *Client) {
 	site := client.site
 	site.mutex.Lock()
 	site.Connections[client] = true
-	site.Count++
-	count := site.Count
 	site.mutex.Unlock()
 
-	log.Printf("客户端 %s 加入站点 %s，在线: %d", client.ip, site.ID, count)
+	log.Printf("客户端连接 %s，等待验证", client.sessionID)
+	
+	// 发送请求验证消息
+	verifyMsg := Message{
+		Type:      "requestVerification",
+		SessionID: client.sessionID,
+		Timestamp: time.Now().Unix(),
+	}
+	
+	select {
+	case client.send <- verifyMsg:
+	default:
+	}
+}
+
+// 处理用户验证（通过行为验证后才计入人数）
+func (h *Hub) handleVerify(client *Client) {
+	if client.site == nil || client.verified {
+		return
+	}
+
+	site := client.site
+	site.mutex.Lock()
+	
+	// 检查是否已存在该session
+	if session, exists := site.Sessions[client.sessionID]; exists {
+		// 更新现有session的活动时间
+		session.LastActivity = time.Now()
+		site.mutex.Unlock()
+		client.verified = true
+		log.Printf("用户 %s 重新连接", client.sessionID)
+		return
+	}
+
+	// 新用户验证通过，计入统计
+	site.Sessions[client.sessionID] = &UserSession{
+		SessionID:    client.sessionID,
+		IsVerified:   true,
+		LastActivity: time.Now(),
+		CreatedAt:    time.Now(),
+	}
+	
+	site.Count = len(site.Sessions)
+	count := site.Count
+	site.mutex.Unlock()
+	
+	client.verified = true
+	log.Printf("用户 %s 验证通过，在线人数: %d", client.sessionID, count)
+	
 	h.broadcastToSite(site.ID, count)
+}
+
+// 处理用户活动更新
+func (h *Hub) handleActivity(client *Client) {
+	if !client.verified || client.site == nil {
+		return
+	}
+
+	site := client.site
+	site.mutex.Lock()
+	if session, exists := site.Sessions[client.sessionID]; exists {
+		session.LastActivity = time.Now()
+	}
+	site.mutex.Unlock()
 }
 
 // 处理客户端注销
@@ -137,15 +219,28 @@ func (h *Hub) handleUnregister(client *Client) {
 	if _, exists := site.Connections[client]; exists {
 		delete(site.Connections, client)
 		close(client.send)
-		site.Count--
-		if site.Count < 0 {
-			site.Count = 0
+		
+		// 如果是验证用户且无其他连接，移除session
+		if client.verified {
+			hasOtherConnection := false
+			for conn := range site.Connections {
+				if conn.sessionID == client.sessionID && conn != client {
+					hasOtherConnection = true
+					break
+				}
+			}
+			
+			if !hasOtherConnection {
+				delete(site.Sessions, client.sessionID)
+				site.Count = len(site.Sessions)
+			}
 		}
+		
 		count := site.Count
 		connectionsLeft := len(site.Connections)
 		site.mutex.Unlock()
 
-		log.Printf("客户端 %s 离开站点 %s，在线: %d", client.ip, site.ID, count)
+		log.Printf("客户端 %s 断开，在线人数: %d", client.sessionID, count)
 
 		if connectionsLeft == 0 {
 			h.mutex.Lock()
@@ -156,6 +251,41 @@ func (h *Hub) handleUnregister(client *Client) {
 		}
 	} else {
 		site.mutex.Unlock()
+	}
+}
+
+// 定期清理过期session
+func (h *Hub) cleanupLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.mutex.RLock()
+		for _, site := range h.sites {
+			site.mutex.Lock()
+			
+			now := time.Now()
+			changed := false
+			
+			// 清理超过5分钟无活动的session
+			for sessionID, session := range site.Sessions {
+				if now.Sub(session.LastActivity) > 5*time.Minute {
+					delete(site.Sessions, sessionID)
+					changed = true
+					log.Printf("清理过期用户 %s", sessionID)
+				}
+			}
+			
+			if changed {
+				site.Count = len(site.Sessions)
+				count := site.Count
+				site.mutex.Unlock()
+				h.broadcastToSite(site.ID, count)
+			} else {
+				site.mutex.Unlock()
+			}
+		}
+		h.mutex.RUnlock()
 	}
 }
 
@@ -200,25 +330,12 @@ func (h *Hub) getSite(siteID string) *Site {
 			ID:          siteID,
 			Count:       0,
 			Connections: make(map[*Client]bool),
+			Sessions:    make(map[string]*UserSession),
 		}
 		h.sites[siteID] = site
 	}
 
 	return site
-}
-
-// 获取客户端真实IP
-func getRealIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return strings.Split(ip, ",")[0]
-	}
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
-		return ip
-	}
-	return r.RemoteAddr
 }
 
 // 检查是否为WebSocket请求
@@ -277,7 +394,7 @@ func parseJSConfig(r *http.Request) JSConfig {
 		SiteID:           getParam(params, "siteId", ""),
 		DisplayElementID: getParam(params, "displayElementId", "liveuser"),
 		ReconnectDelay:   getIntParam(params, "reconnectDelay", 3000),
-		Debug:            getBoolParam(params, "debug", true),
+		Debug:            getBoolParam(params, "debug", false),
 	}
 
 	if config.SiteID == "" {
@@ -337,13 +454,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIP := getRealIP(r)
-
 	client := &Client{
 		conn: conn,
 		hub:  hub,
 		send: make(chan Message, 16),
-		ip:   clientIP,
 	}
 
 	go client.readPump()
@@ -357,7 +471,7 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(256)
+	c.conn.SetReadLimit(512)
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -375,17 +489,32 @@ func (c *Client) readPump() {
 			continue
 		}
 
-		if msg.Type == "join" && msg.SiteID != "" {
-			siteID := strings.TrimSpace(msg.SiteID)
+		switch msg.Type {
+		case "join":
+			if msg.SiteID != "" && msg.SessionID != "" {
+				siteID := strings.TrimSpace(msg.SiteID)
+				sessionID := strings.TrimSpace(msg.SessionID)
 
-			if c.site != nil && c.site.ID != siteID {
-				c.hub.unregister <- c
+				if c.site != nil && c.site.ID != siteID {
+					c.hub.unregister <- c
+				}
+
+				if c.site == nil || c.site.ID != siteID {
+					site := c.hub.getSite(siteID)
+					c.site = site
+					c.sessionID = sessionID
+					c.hub.register <- c
+				}
 			}
-
-			if c.site == nil || c.site.ID != siteID {
-				site := c.hub.getSite(siteID)
-				c.site = site
-				c.hub.register <- c
+		case "verify":
+			// 收到用户行为验证
+			if c.sessionID != "" && !c.verified {
+				c.hub.verify <- c
+			}
+		case "activity":
+			// 收到用户活动心跳
+			if c.verified {
+				c.hub.activity <- c
 			}
 		}
 	}
