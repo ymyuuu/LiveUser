@@ -23,6 +23,7 @@ import (
 var Version = "dev"
 
 // 内置静态文件
+//
 //go:embed demo.html
 var demoHTML string
 
@@ -31,10 +32,9 @@ var mainJS string
 
 // 站点数据结构
 type Site struct {
-	ID          string           `json:"id"`
-	Count       int              `json:"count"`
-	Connections map[*Client]bool `json:"-"`
-	mutex       sync.RWMutex     `json:"-"`
+	ID          string           `json:"id"` // 站点ID
+	Connections map[*Client]bool `json:"-"`  // 当前站点的所有连接
+	mutex       sync.RWMutex     `json:"-"`  // 读写锁保护连接
 }
 
 // 客户端连接
@@ -117,12 +117,11 @@ func (h *Hub) handleRegister(client *Client) {
 	site := client.site
 	site.mutex.Lock()
 	site.Connections[client] = true
-	site.Count++
-	count := site.Count
+	count := len(site.Connections) // 使用连接数量作为在线人数，确保准确
 	site.mutex.Unlock()
 
 	log.Printf("客户端 %s 加入站点 %s，在线: %d", client.ip, site.ID, count)
-	h.broadcastToSite(site.ID, count)
+	h.broadcastToSite(site.ID)
 }
 
 // 处理客户端注销
@@ -137,12 +136,8 @@ func (h *Hub) handleUnregister(client *Client) {
 	if _, exists := site.Connections[client]; exists {
 		delete(site.Connections, client)
 		close(client.send)
-		site.Count--
-		if site.Count < 0 {
-			site.Count = 0
-		}
-		count := site.Count
-		connectionsLeft := len(site.Connections)
+		count := len(site.Connections) // 当前连接数量
+		connectionsLeft := count
 		site.mutex.Unlock()
 
 		log.Printf("客户端 %s 离开站点 %s，在线: %d", client.ip, site.ID, count)
@@ -152,7 +147,7 @@ func (h *Hub) handleUnregister(client *Client) {
 			delete(h.sites, site.ID)
 			h.mutex.Unlock()
 		} else {
-			h.broadcastToSite(site.ID, count)
+			h.broadcastToSite(site.ID)
 		}
 	} else {
 		site.mutex.Unlock()
@@ -160,7 +155,25 @@ func (h *Hub) handleUnregister(client *Client) {
 }
 
 // 向指定站点广播消息
-func (h *Hub) broadcastToSite(siteID string, count int) {
+func (h *Hub) broadcastToSite(siteID string) {
+	h.mutex.RLock()
+	site, exists := h.sites[siteID]
+	h.mutex.RUnlock()
+	if !exists {
+		return
+	}
+
+	site.mutex.Lock()
+
+	// 清理发送缓冲区已满的连接，避免统计错误
+	for client := range site.Connections {
+		if len(client.send) == cap(client.send) {
+			close(client.send)
+			delete(site.Connections, client)
+		}
+	}
+
+	count := len(site.Connections)
 	message := Message{
 		Type:      "update",
 		SiteID:    siteID,
@@ -168,24 +181,22 @@ func (h *Hub) broadcastToSite(siteID string, count int) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	h.mutex.RLock()
-	site, exists := h.sites[siteID]
-	h.mutex.RUnlock()
-
-	if !exists {
-		return
-	}
-
-	site.mutex.RLock()
-	defer site.mutex.RUnlock()
-
 	for client := range site.Connections {
 		select {
 		case client.send <- message:
 		default:
-			delete(site.Connections, client)
+			// 发送失败的连接视为失效
 			close(client.send)
+			delete(site.Connections, client)
 		}
+	}
+
+	newCount := len(site.Connections)
+	site.mutex.Unlock()
+
+	// 若在发送过程中有连接被移除，则再次广播最新人数
+	if newCount != count {
+		h.broadcastToSite(siteID)
 	}
 }
 
@@ -198,7 +209,6 @@ func (h *Hub) getSite(siteID string) *Site {
 	if !exists {
 		site = &Site{
 			ID:          siteID,
-			Count:       0,
 			Connections: make(map[*Client]bool),
 		}
 		h.sites[siteID] = site
