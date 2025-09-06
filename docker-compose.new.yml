@@ -1,0 +1,128 @@
+# LiveUser 2.0 重构版 Docker Compose 配置
+version: '3.8'
+
+services:
+  liveuser:
+    build:
+      context: .
+      dockerfile: Dockerfile.new
+    container_name: liveuser-v2
+    restart: unless-stopped
+    ports:
+      - "10086:10086"
+    volumes:
+      # 配置文件挂载（可选，使用自定义配置）
+      - ./config:/app/config:ro
+      # 日志目录挂载
+      - ./logs:/app/logs
+    environment:
+      # 环境变量配置（覆盖config.yaml中的设置）
+      - LIVEUSER_HOST=0.0.0.0
+      - LIVEUSER_PORT=10086
+      - LIVEUSER_LOG_LEVEL=info
+      - LIVEUSER_ENABLE_IP_DEDUP=true
+      # 设置时区
+      - TZ=Asia/Shanghai
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:10086/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # 网络配置
+    networks:
+      - liveuser-network
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+  # 可选：添加反向代理（nginx）
+  nginx:
+    image: nginx:alpine
+    container_name: liveuser-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - liveuser
+    networks:
+      - liveuser-network
+    profiles:
+      - proxy
+
+  # 可选：添加监控（Prometheus）
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: liveuser-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - liveuser-network
+    profiles:
+      - monitoring
+
+  # 可选：添加可视化面板（Grafana）
+  grafana:
+    image: grafana/grafana:latest
+    container_name: liveuser-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - liveuser-network
+    profiles:
+      - monitoring
+    depends_on:
+      - prometheus
+
+networks:
+  liveuser-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+# 使用说明:
+# 基础运行: docker-compose -f docker-compose.new.yml up -d
+# 包含代理: docker-compose -f docker-compose.new.yml --profile proxy up -d
+# 包含监控: docker-compose -f docker-compose.new.yml --profile monitoring up -d
+# 完整运行: docker-compose -f docker-compose.new.yml --profile proxy --profile monitoring up -d

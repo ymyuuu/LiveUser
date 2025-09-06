@@ -1,0 +1,81 @@
+# LiveUser 2.0 配置文件
+# 重构版本配置，支持更多自定义选项
+
+# 服务器配置
+server:
+  host: "0.0.0.0"              # 监听地址，0.0.0.0表示监听所有网卡
+  port: 10086                  # 监听端口
+  read_timeout: 30s            # HTTP读取超时时间
+  write_timeout: 30s           # HTTP写入超时时间
+  idle_timeout: 120s           # HTTP空闲连接超时时间
+
+# WebSocket配置
+websocket:
+  read_buffer_size: 1024       # WebSocket读缓冲区大小（字节）
+  write_buffer_size: 1024      # WebSocket写缓冲区大小（字节）
+  ping_period: 54s             # Ping消息发送间隔
+  pong_timeout: 60s            # Pong响应超时时间
+  max_message_size: 512        # 最大消息大小（字节）
+
+# 分析和统计配置
+analytics:
+  enable_ip_dedup: true        # 启用IP去重（解决CDN多层代理问题）
+  session_timeout: 30m         # 用户会话超时时间
+  cleanup_interval: 5m         # 清理任务运行间隔
+  max_sites: 1000              # 最大站点数量限制
+  max_connections: 10000       # 单个站点最大连接数限制
+
+# 日志配置
+logging:
+  level: "info"                # 日志级别：debug, info, warn, error
+  file: "logs/liveuser.log"    # 日志文件路径（空则只输出到控制台）
+  max_size: 100                # 日志文件最大大小（MB）
+  max_backups: 3               # 保留的历史日志文件数量
+  max_age: 7                   # 日志文件保留天数
+
+# 高级配置示例（可选）
+# advanced:
+#   # 启用性能监控
+#   enable_metrics: true
+#   metrics_interval: 60s
+#   
+#   # 启用站点白名单（如果设置，只允许列表中的站点）
+#   # site_whitelist:
+#   #   - "example.com"
+#   #   - "blog.example.com"
+#   
+#   # 启用IP黑名单
+#   # ip_blacklist:
+#   #   - "192.168.1.100"
+#   
+#   # 自定义CORS设置
+#   cors:
+#     allow_origins: ["*"]
+#     allow_methods: ["GET", "POST", "OPTIONS"]
+#     allow_headers: ["Origin", "Content-Type", "Accept"]
+#     max_age: 86400
+
+# 开发环境配置示例
+# development:
+#   server:
+#     port: 3000
+#   logging:
+#     level: "debug"
+#   websocket:
+#     ping_period: 30s
+#   analytics:
+#     cleanup_interval: 1m
+
+# 生产环境配置示例
+# production:
+#   server:
+#     read_timeout: 10s
+#     write_timeout: 10s
+#   logging:
+#     level: "warn"
+#     file: "/var/log/liveuser/app.log"
+#     max_size: 500
+#     max_backups: 10
+#   analytics:
+#     max_sites: 10000
+#     max_connections: 50000
