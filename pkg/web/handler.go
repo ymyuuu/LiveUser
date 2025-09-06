@@ -179,15 +179,21 @@ func (h *Handler) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // handleHealth 处理健康检查
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// 获取系统统计以获得正确的启动时间
+	systemStats := h.manager.GetSystemStats()
+	uptime := "unknown"
+	if uptimeStr, ok := systemStats["uptime"].(string); ok {
+		uptime = uptimeStr
+	}
+	
 	health := map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
-		"uptime":    time.Since(time.Now()).String(), // 这里应该是启动时间
+		"uptime":    uptime,
 		"version":   "2.0.0",
 	}
 
 	// 检查各个组件的健康状态
-	systemStats := h.manager.GetSystemStats()
 	hubStats := h.hub.GetStats()
 
 	// 添加简单的健康检查逻辑
@@ -199,7 +205,7 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(health); err != nil {
-		utils.WithError(err).Error("健康检查JSON编码失败", nil)
+		utils.WithError(err).Error("健康检查JSON编码失败")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

@@ -118,10 +118,10 @@ func (c *Client) readPump() {
 		_, messageData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				utils.WithClient(c.ipInfo.RealIP, c.userAgent).Error("WebSocket读取错误", map[string]interface{}{
+				utils.WithClient(c.ipInfo.RealIP, c.userAgent).WithFields(map[string]interface{}{
 					"client_id": c.ID,
 					"error":     err.Error(),
-				})
+				}).Error("WebSocket读取错误")
 			}
 			break
 		}
@@ -129,21 +129,21 @@ func (c *Client) readPump() {
 		// 解析消息
 		var msg ClientMessage
 		if err := json.Unmarshal(messageData, &msg); err != nil {
-			utils.WithClient(c.ipInfo.RealIP, c.userAgent).Warn("消息解析失败", map[string]interface{}{
+			utils.WithClient(c.ipInfo.RealIP, c.userAgent).WithFields(map[string]interface{}{
 				"client_id": c.ID,
 				"error":     err.Error(),
 				"raw_data":  string(messageData),
-			})
+			}).Warn("消息解析失败")
 			continue
 		}
 
 		// 处理消息
 		if err := c.handleMessage(&msg); err != nil {
-			utils.WithClient(c.ipInfo.RealIP, c.userAgent).Error("消息处理失败", map[string]interface{}{
+			utils.WithClient(c.ipInfo.RealIP, c.userAgent).WithFields(map[string]interface{}{
 				"client_id": c.ID,
 				"message_type": msg.Type,
 				"error":     err.Error(),
-			})
+			}).Error("消息处理失败")
 		}
 	}
 }

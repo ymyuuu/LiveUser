@@ -85,7 +85,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		utils.WithContext(map[string]interface{}{
 			"remote_addr": r.RemoteAddr,
 			"user_agent":  r.Header.Get("User-Agent"),
-		}).Warn("连接数达到上限，拒绝新连接", nil)
+		}).Warn("连接数达到上限，拒绝新连接")
 		
 		http.Error(w, "连接数达到上限", http.StatusServiceUnavailable)
 		h.stats.mutex.Lock()
@@ -132,7 +132,7 @@ func (h *Hub) run() {
 			client.setInactive()
 		}
 		
-		utils.Logger.Info("Hub主循环结束", nil)
+		utils.Logger.Info("Hub主循环结束")
 	}()
 
 	for {
@@ -279,7 +279,7 @@ func (h *Hub) listenForMessages() {
 		}
 	}
 
-	utils.Logger.Info("停止监听管理器消息", nil)
+	utils.Logger.Info("停止监听管理器消息")
 }
 
 // Broadcast 发送广播消息
@@ -381,7 +381,7 @@ func (h *Hub) GetClientsBySite(siteID string) []*Client {
 
 // Shutdown 优雅关闭Hub
 func (h *Hub) Shutdown() {
-	utils.Logger.Info("开始关闭WebSocket Hub", nil)
+	utils.Logger.Info("开始关闭WebSocket Hub")
 
 	// 发送关闭信号
 	h.cancel()

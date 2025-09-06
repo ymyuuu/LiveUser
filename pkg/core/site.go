@@ -282,7 +282,7 @@ func (s *Site) ResetDailyStats() {
 	s.Stats.ConnectionsToday = 0
 	s.Stats.LastReset = time.Now()
 
-	utils.WithSite(s.ID).Info("重置日统计", nil)
+	utils.WithSite(s.ID).Info("重置日统计")
 }
 
 // GetDetailedInfo 获取详细信息（管理用）

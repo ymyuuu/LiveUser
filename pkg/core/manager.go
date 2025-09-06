@@ -336,7 +336,7 @@ func (m *Manager) runStatsTask() {
 
 // Shutdown 优雅关闭管理器
 func (m *Manager) Shutdown() {
-	utils.Logger.Info("开始关闭核心管理器", nil)
+	utils.Logger.Info("开始关闭核心管理器")
 	
 	// 发送关闭消息到所有连接
 	shutdownMsg := &Message{
@@ -349,7 +349,7 @@ func (m *Manager) Shutdown() {
 	select {
 	case m.messageChannel <- shutdownMsg:
 	default:
-		utils.Logger.Warn("无法发送关闭消息，通道可能已满", nil)
+		utils.Logger.Warn("无法发送关闭消息，通道可能已满")
 	}
 
 	// 取消上下文，停止所有后台任务

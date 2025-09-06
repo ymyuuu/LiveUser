@@ -104,6 +104,13 @@ type LogEntry struct {
 	*logrus.Entry
 }
 
+// WithFields 添加额外字段
+func (le *LogEntry) WithFields(fields map[string]interface{}) *LogEntry {
+	return &LogEntry{
+		Entry: le.Entry.WithFields(logrus.Fields(fields)),
+	}
+}
+
 // WithContext 创建带上下文的日志条目
 func WithContext(ctx map[string]interface{}) *LogEntry {
 	fields := logrus.Fields{}
@@ -130,6 +137,39 @@ func WithClient(clientIP string, userAgent string) *LogEntry {
 			"client_ip":  clientIP,
 			"user_agent": userAgent,
 		}),
+	}
+}
+
+// 重新定义LogEntry的方法以支持可选的fields参数
+func (le *LogEntry) Info(msg string, fields ...map[string]interface{}) {
+	if len(fields) > 0 && len(fields[0]) > 0 {
+		le.Entry.WithFields(logrus.Fields(fields[0])).Info(msg)
+	} else {
+		le.Entry.Info(msg)
+	}
+}
+
+func (le *LogEntry) Warn(msg string, fields ...map[string]interface{}) {
+	if len(fields) > 0 && len(fields[0]) > 0 {
+		le.Entry.WithFields(logrus.Fields(fields[0])).Warn(msg)
+	} else {
+		le.Entry.Warn(msg)
+	}
+}
+
+func (le *LogEntry) Error(msg string, fields ...map[string]interface{}) {
+	if len(fields) > 0 && len(fields[0]) > 0 {
+		le.Entry.WithFields(logrus.Fields(fields[0])).Error(msg)
+	} else {
+		le.Entry.Error(msg)
+	}
+}
+
+func (le *LogEntry) Debug(msg string, fields ...map[string]interface{}) {
+	if len(fields) > 0 && len(fields[0]) > 0 {
+		le.Entry.WithFields(logrus.Fields(fields[0])).Debug(msg)
+	} else {
+		le.Entry.Debug(msg)
 	}
 }
 
